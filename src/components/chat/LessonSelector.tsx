@@ -10,6 +10,7 @@ interface LessonSelectorProps {
   completedLessons?: string[];
   lessonProgress?: Map<string, LessonProgress>;
   onResetLesson: (lessonId: string) => void;
+  allowedLessonIds?: string[];
 }
 
 export const LessonSelector = ({
@@ -17,7 +18,8 @@ export const LessonSelector = ({
   onSelectLesson,
   completedLessons = [],
   lessonProgress = new Map(),
-  onResetLesson
+  onResetLesson,
+  allowedLessonIds,
 }: LessonSelectorProps) => {
   return (
     <div className="grid gap-4 w-full grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
@@ -36,25 +38,29 @@ export const LessonSelector = ({
         const isPassing = percentage !== null && percentage >= 80;
 
         const isLesson1 = lesson.id === "earning-money";
+        const isBundleLocked =
+          allowedLessonIds !== undefined && !allowedLessonIds.includes(lesson.id);
 
         return (
           <div
             key={lesson.id}
-            className={`relative rounded-xl border-2 transition-all overflow-hidden h-full flex flex-col ${lesson.isAvailable
-              ? isCompleted
-                ? (isPassing || isLesson1)
-                  ? "border-primary/50 bg-primary/5 hover:border-primary hover:shadow-md cursor-pointer"
-                  : "border-accent/50 bg-accent/5 hover:border-accent hover:shadow-md cursor-pointer"
-                : "border-border hover:border-primary/50 hover:shadow-md cursor-pointer"
-              : "border-muted opacity-60"
+            className={`relative rounded-xl border-2 transition-all overflow-hidden h-full flex flex-col ${isBundleLocked
+              ? "border-muted opacity-70 bg-muted/10"
+              : lesson.isAvailable
+                ? isCompleted
+                  ? (isPassing || isLesson1)
+                    ? "border-primary/50 bg-primary/5 hover:border-primary hover:shadow-md cursor-pointer"
+                    : "border-accent/50 bg-accent/5 hover:border-accent hover:shadow-md cursor-pointer"
+                  : "border-border hover:border-primary/50 hover:shadow-md cursor-pointer"
+                : "border-muted opacity-60"
               }`}
           >
             <div className="flex flex-col gap-2 w-full h-full">
               <Button
                 variant="ghost"
                 className="w-full h-full p-3 sm:p-4 flex flex-col items-start gap-2 text-left whitespace-normal flex-1"
-                disabled={!lesson.isAvailable}
-                onClick={() => lesson.isAvailable && onSelectLesson(lesson.id)}
+                disabled={!lesson.isAvailable || isBundleLocked}
+                onClick={() => !isBundleLocked && lesson.isAvailable && onSelectLesson(lesson.id)}
               >
                 <div className="flex items-center justify-between w-full gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
@@ -86,7 +92,14 @@ export const LessonSelector = ({
                     )}
                   </div>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground whitespace-nowrap">
-                    {lesson.isAvailable ? (
+                    {isBundleLocked ? (
+                      <>
+                        <Lock className="w-3 h-3 flex-shrink-0 text-muted-foreground" />
+                        <span className="text-[10px] font-medium bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full border border-muted-foreground/20">
+                          Upgrade to unlock
+                        </span>
+                      </>
+                    ) : lesson.isAvailable ? (
                       <>
                         <Clock className="w-3 h-3 flex-shrink-0" />
                         {lesson.duration}
@@ -133,7 +146,7 @@ export const LessonSelector = ({
                 )}
               </Button>
 
-              {isCompleted && (
+              {isCompleted && !isBundleLocked && (
                 <Button
                   variant="outline"
                   size="sm"

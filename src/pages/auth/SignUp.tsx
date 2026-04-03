@@ -1,6 +1,5 @@
-
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,8 +10,15 @@ import launchpadLogo from "@/assets/launchpad-logo.png";
 
 export default function SignUp() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+
+    const inviteEmail = searchParams.get("email") ?? "";
+    const isStudentSignup = inviteEmail !== "";
+
     const [loading, setLoading] = useState(false);
-    const [formData, setFormData] = useState({
+
+    // Org admin fields
+    const [adminForm, setAdminForm] = useState({
         firstName: "",
         lastName: "",
         groupName: "",
@@ -20,176 +26,277 @@ export default function SignUp() {
         password: "",
     });
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value });
+    // Student fields
+    const [studentForm, setStudentForm] = useState({
+        password: "",
+        confirmPassword: "",
+    });
+
+    const handleAdminChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setAdminForm({ ...adminForm, [e.target.name]: e.target.value });
     };
 
-    const handleSignUp = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
+    const handleStudentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setStudentForm({ ...studentForm, [e.target.name]: e.target.value });
+    };
 
-        if (formData.password.length < 6) {
-            toast.error("Password must be at least 6 characters long");
-            setLoading(false);
+    /**
+     * Handles org admin signup: creates auth user, profile, and organization.
+     * @param e - Form submit event.
+     */
+    const handleAdminSignUp = async (e: React.FormEvent) => {
+        e.preventDefault();
+
+        if (!adminForm.firstName.trim() || !adminForm.lastName.trim()) {
+            toast.error("First name and last name are required");
+            return;
+        }
+        if (!adminForm.groupName.trim()) {
+            toast.error("Organization name is required");
             return;
         }
 
+        setLoading(true);
+
         try {
-            const { data: { user }, error: signUpError } = await supabase.auth.signUp({
-                email: formData.email,
-                password: formData.password,
+            // 1. Create auth user
+            const { data, error: signUpError } = await supabase.auth.signUp({
+                email: adminForm.email,
+                password: adminForm.password,
             });
 
-            if (signUpError) throw signUpError;
-            if (!user) throw new Error("No user created");
+            if (signUpError) throw new Error(`Auth Error: ${signUpError.message}`);
+            if (!data.user) throw new Error("Authentication failed - no user returned.");
 
+            // 2. Create profile row
             const { error: profileError } = await supabase
                 .from('profiles')
                 .insert({
-                    id: user.id,
-                    first_name: formData.firstName,
-                    last_name: formData.lastName,
-                    group_name: formData.groupName,
+                    id: data.user.id,
+                    first_name: adminForm.firstName.trim(),
+                    last_name: adminForm.lastName.trim(),
+                    group_name: adminForm.groupName.trim(),
+                    role: 'org_admin',
+                    created_at: new Date().toISOString(),
                 });
 
-            if (profileError) {
-                console.error("Profile creation error:", profileError);
-                toast.error("Account created but profile setup failed.");
-            } else {
-                toast.success("Account created! Please sign in.");
-                navigate("/login");
+            if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`);
+
+            // 3. Create organization entry (non-blocking)
+            try {
+                const { error: orgError } = await supabase
+                    .from('organizations')
+                    .insert({
+                        admin_id: data.user.id,
+                        name: adminForm.groupName.trim(),
+                        total_seats: 0,
+                        used_seats: 0,
+                    });
+
+                if (orgError) console.warn("SignUp: Org creation issue (non-blocking):", orgError);
+            } catch (orgCatch: unknown) {
+                console.warn("SignUp: Organization creation failed (non-blocking):", orgCatch);
             }
 
-        } catch (error: any) {
-            toast.error(error.message || "Error signing up");
+            toast.success("Organization account created successfully!");
+            navigate("/login");
+        } catch (error: unknown) {
+            toast.error((error as { message?: string }).message || "An error occurred during signup");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    /**
+     * Handles student signup via invite link: validates license, creates auth user,
+     * profile, and activates the license.
+     * @param e - Form submit event.
+     */
+    const handleStudentSignUp = async (e: React.FormEvent) => {
+        e.preventDefault();
+
+        if (studentForm.password !== studentForm.confirmPassword) {
+            toast.error("Passwords do not match");
+            return;
+        }
+
+        setLoading(true);
+
+        try {
+            // 1. Create auth user
+            const { data, error: signUpError } = await supabase.auth.signUp({
+                email: inviteEmail,
+                password: studentForm.password,
+            });
+
+            if (signUpError) throw new Error(`Auth Error: ${signUpError.message}`);
+            if (!data.user) throw new Error("Authentication failed - no user returned.");
+
+            // 2. Verify an active invitation exists for this email
+            const { data: license, error: licenseError } = await supabase
+                .from('licenses')
+                .select('id, org_id, course_type')
+                .eq('student_email', inviteEmail)
+                .eq('is_active', false)
+                .limit(1)
+                .maybeSingle();
+
+            if (licenseError) throw new Error(`License check failed: ${licenseError.message}`);
+
+            if (!license) {
+                toast.error("No invitation found for this email. Please contact your organization admin.");
+                // Roll back the auth user we just created so the email stays available
+                await supabase.auth.signOut();
+                return;
+            }
+
+            // 3. Create student profile (name filled in at /complete-profile)
+            const { error: profileError } = await supabase
+                .from('profiles')
+                .insert({
+                    id: data.user.id,
+                    first_name: '',
+                    last_name: '',
+                    role: 'student',
+                    created_at: new Date().toISOString(),
+                });
+
+            if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`);
+
+            // 4. Activate the license and link it to this user
+            const { data: updatedLicense, error: licenseUpdateError } = await supabase
+                .from('licenses')
+                .update({ is_active: true, user_id: data.user.id })
+                .eq('id', license.id)
+                .select('id');
+
+            if (licenseUpdateError) {
+                console.error('SignUp: License activation error:', licenseUpdateError);
+                throw new Error(`License activation failed: ${licenseUpdateError.message}`);
+            }
+
+            if (!updatedLicense || updatedLicense.length === 0) {
+                console.error('SignUp: License update blocked — 0 rows affected (likely RLS). License id:', license.id, 'User id:', data.user.id);
+                toast.error("Account created but license activation failed. Please contact your admin.");
+                navigate("/complete-profile");
+                return;
+            }
+
+            toast.success("Account created! Please complete your profile.");
+            navigate("/complete-profile");
+        } catch (error: unknown) {
+            toast.error((error as { message?: string }).message || "An error occurred during signup");
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="w-full lg:grid lg:min-h-screen lg:grid-cols-2">
+        <div className="w-full lg:grid lg:min-h-screen lg:grid-cols-2 bg-background font-sans">
             <div className="hidden bg-muted lg:block">
-                <div className="h-full w-full object-cover bg-slate-900 relative flex flex-col items-center justify-center p-12 text-center">
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900 to-slate-800" />
-                    <div className="relative z-10 flex flex-col items-center">
-                        <img
-                            src={launchpadLogo}
-                            alt="LaunchPad Logo"
-                            className="h-24 w-auto mb-8 animate-fade-in"
-                        />
-                        <h2 className="text-3xl font-bold text-white mb-4">
-                            Start Your Journey
-                        </h2>
-                        <p className="text-slate-300 max-w-md text-lg leading-relaxed">
-                            Create your account to access all lessons, track your progress, and earn certificates. It's time to take control of your financial future.
-                        </p>
-                    </div>
-                    <div className="relative z-10 mt-12 w-full max-w-sm">
-                        <div className="bg-white/5 p-6 rounded-lg backdrop-blur-sm border border-white/10">
-                            <p className="text-slate-200 italic mb-2">
-                                "The best investment you can make is in yourself."
-                            </p>
-                            <p className="text-sm text-primary font-semibold">
-                                — Warren Buffett
-                            </p>
-                        </div>
+                <div className="h-full w-full bg-slate-900 relative flex flex-col items-center justify-center p-12 text-center">
+                    <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900" />
+                    <div className="relative z-10 flex flex-col items-center text-white">
+                        <img src={launchpadLogo} alt="Logo" className="h-24 w-auto mb-8" />
+                        {isStudentSignup ? (
+                            <>
+                                <h2 className="text-4xl font-bold mb-4">You're Invited!</h2>
+                                <p className="text-slate-400 max-w-md text-lg">Create your student account to access your financial literacy courses.</p>
+                            </>
+                        ) : (
+                            <>
+                                <h2 className="text-4xl font-bold mb-4">Partner with LaunchPad</h2>
+                                <p className="text-slate-400 max-w-md text-lg">Manage your students and licenses professionally.</p>
+                            </>
+                        )}
                     </div>
                 </div>
             </div>
 
-            <div className="flex items-center justify-center py-12 px-4 sm:px-8">
-                <div className="mx-auto grid w-full max-w-sm gap-6">
-                    <div className="flex flex-col space-y-2 text-center lg:text-left">
-                        {/* Mobile Logo */}
-                        <div className="lg:hidden flex justify-center mb-4">
-                            <img src={launchpadLogo} alt="LaunchPad Logo" className="h-16 w-auto" />
-                        </div>
-
-                        <h1 className="text-3xl font-semibold tracking-tight">
-                            Create an account
-                        </h1>
-                        <p className="text-sm text-muted-foreground">
-                            Enter your details to create your participant account
-                        </p>
-                    </div>
-
-                    <form onSubmit={handleSignUp} className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="firstName">First name</Label>
-                                <Input
-                                    id="firstName"
-                                    name="firstName"
-                                    placeholder="Alex"
-                                    required
-                                    value={formData.firstName}
-                                    onChange={handleChange}
-                                    className="bg-background"
-                                />
+            <div className="flex items-center justify-center py-12 px-6 bg-background">
+                <div className="mx-auto grid w-full max-w-[400px] gap-8">
+                    {isStudentSignup ? (
+                        <>
+                            <div className="text-center lg:text-left">
+                                <h1 className="text-3xl font-bold">Create Student Account</h1>
+                                <p className="text-sm text-muted-foreground">Complete your registration to get started</p>
                             </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="lastName">Last name</Label>
-                                <Input
-                                    id="lastName"
-                                    name="lastName"
-                                    placeholder="Doe"
-                                    required
-                                    value={formData.lastName}
-                                    onChange={handleChange}
-                                    className="bg-background"
-                                />
-                            </div>
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="groupName">Group / Class Name</Label>
-                            <Input
-                                id="groupName"
-                                name="groupName"
-                                placeholder="Summer Camp 2024"
-                                required
-                                value={formData.groupName}
-                                onChange={handleChange}
-                                className="bg-background"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="email">Email</Label>
-                            <Input
-                                id="email"
-                                name="email"
-                                type="email"
-                                placeholder="name@example.com"
-                                required
-                                value={formData.email}
-                                onChange={handleChange}
-                                className="bg-background"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="password">Password</Label>
-                            <Input
-                                id="password"
-                                name="password"
-                                type="password"
-                                required
-                                value={formData.password}
-                                onChange={handleChange}
-                                className="bg-background"
-                            />
-                        </div>
-                        <Button type="submit" className="w-full" disabled={loading}>
-                            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Sign Up
-                        </Button>
-                    </form>
 
-                    <div className="text-center text-sm text-muted-foreground">
-                        Already have an account?{" "}
-                        <Link to="/login" className="font-semibold text-primary underline underline-offset-4 hover:text-primary/90">
-                            Sign in
-                        </Link>
-                    </div>
+                            <form onSubmit={handleStudentSignUp} className="space-y-5">
+                                <div className="space-y-2">
+                                    <Label>Email</Label>
+                                    <Input
+                                        type="email"
+                                        value={inviteEmail}
+                                        readOnly
+                                        className="bg-muted text-muted-foreground cursor-not-allowed"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Password</Label>
+                                    <Input
+                                        name="password"
+                                        type="password"
+                                        required
+                                        value={studentForm.password}
+                                        onChange={handleStudentChange}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Confirm Password</Label>
+                                    <Input
+                                        name="confirmPassword"
+                                        type="password"
+                                        required
+                                        value={studentForm.confirmPassword}
+                                        onChange={handleStudentChange}
+                                    />
+                                </div>
+                                <Button type="submit" className="w-full h-11 font-bold" disabled={loading}>
+                                    {loading ? <Loader2 className="mr-2 animate-spin" /> : "Create Account"}
+                                </Button>
+                            </form>
+                        </>
+                    ) : (
+                        <>
+                            <div className="text-center lg:text-left">
+                                <h1 className="text-3xl font-bold">Create Organization</h1>
+                                <p className="text-sm text-muted-foreground">Register as a Group Leader</p>
+                            </div>
+
+                            <form onSubmit={handleAdminSignUp} className="space-y-5">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>First Name</Label>
+                                        <Input name="firstName" required value={adminForm.firstName} onChange={handleAdminChange} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Last Name</Label>
+                                        <Input name="lastName" required value={adminForm.lastName} onChange={handleAdminChange} />
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Organization Name</Label>
+                                    <Input name="groupName" required value={adminForm.groupName} onChange={handleAdminChange} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Email</Label>
+                                    <Input name="email" type="email" required value={adminForm.email} onChange={handleAdminChange} />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Password</Label>
+                                    <Input name="password" type="password" required value={adminForm.password} onChange={handleAdminChange} />
+                                </div>
+                                <Button type="submit" className="w-full h-11 font-bold" disabled={loading}>
+                                    {loading ? <Loader2 className="mr-2 animate-spin" /> : "Create Account"}
+                                </Button>
+                            </form>
+                        </>
+                    )}
+
+                    <p className="text-center text-sm">
+                        Already have an account? <Link to="/login" className="text-primary font-bold">Sign in</Link>
+                    </p>
                 </div>
             </div>
         </div>

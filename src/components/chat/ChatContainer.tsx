@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOrgName } from "@/hooks/useOrgName";
+import { useStudentBundle } from "@/hooks/useStudentBundle";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
@@ -12,14 +14,18 @@ import { useGenericLesson } from "@/hooks/useGenericLesson";
 import { useProgressTracking, LessonProgress } from "@/hooks/useProgressTracking";
 import { getLessonData, isGenericLesson } from "@/data/lessonDataLoader";
 import { Button } from "@/components/ui/button";
-import { Rocket, ArrowLeft } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { toast } from "@/hooks/use-toast";
+import { Rocket, ArrowLeft, Building2 } from "lucide-react";
 import { lessons } from "@/data/lessons";
 import launchpadLogo from "@/assets/launchpad-logo.png";
 
 type ViewState = "menu" | string; // "menu" or lessonId
 
 export const ChatContainer = () => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
+  const { orgName } = useOrgName(user?.email);
+  const { allowedLessonIds } = useStudentBundle(user?.email, profile?.role);
   const [viewState, setViewState] = useState<ViewState>("menu");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
   const lastRecordedCompletionId = useRef<string | null>(null);
@@ -142,6 +148,15 @@ export const ChatContainer = () => {
   }, [lesson2.completionData, viewState, recordLessonCompletion]);
 
   const handleSelectLesson = useCallback((lessonId: string) => {
+    if (!allowedLessonIds.includes(lessonId)) {
+      toast({
+        title: "Lesson not available",
+        description: "This lesson is not included in your current plan. Please contact your admin to upgrade.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setActiveLessonId(lessonId);
     setViewState(lessonId);
 
@@ -149,7 +164,7 @@ export const ChatContainer = () => {
     if (isGenericLesson(lessonId)) {
       genericLesson.resetLesson();
     }
-  }, [genericLesson]);
+  }, [allowedLessonIds, genericLesson]);
 
   const handleBackToMenu = useCallback(() => {
     const currentLessonId = viewState;
@@ -212,9 +227,18 @@ export const ChatContainer = () => {
             <h2 className="font-display text-2xl lg:text-4xl font-bold text-foreground mb-2 text-center">
               Welcome to LaunchPad{profile?.first_name ? `, ${profile.first_name}` : ""}!
             </h2>
-            <p className="text-muted-foreground text-center max-w-sm lg:max-w-2xl lg:text-xl mb-6">
+            <p className="text-muted-foreground text-center max-w-sm lg:max-w-2xl lg:text-xl mb-4">
               Your journey to financial literacy starts here. Choose a lesson to begin learning!
             </p>
+
+            {/* Organization badge */}
+            {orgName && (
+              <div className="flex items-center gap-2 mb-6 px-4 py-2 rounded-full bg-primary/10 border border-primary/20">
+                <Building2 className="h-4 w-4 text-primary shrink-0" />
+                <span className="text-sm font-semibold text-primary">{orgName}</span>
+                <Badge variant="secondary" className="text-xs">Member</Badge>
+              </div>
+            )}
 
             {/* Progress Dashboard */}
             {progressLoading ? (
@@ -237,6 +261,7 @@ export const ChatContainer = () => {
               completedLessons={completedLessons}
               lessonProgress={lessonProgressMap}
               onResetLesson={resetLessonProgress}
+              allowedLessonIds={allowedLessonIds}
             />
 
             <p className="text-xs text-muted-foreground mt-6 text-center max-w-xs">

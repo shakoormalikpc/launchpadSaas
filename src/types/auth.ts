@@ -4,6 +4,7 @@ export interface Profile {
     first_name: string | null;
     last_name: string | null;
     group_name: string | null;
+    role: string | null;
     avatar_url: string | null;
     created_at: string;
 }
@@ -13,8 +14,8 @@ export interface UserProgress {
     user_id: string;
     lesson_id: string;
     status: 'started' | 'completed';
-    score_pre: number | null;
     score_post: number | null;
+    score_post_total: number | null;
     updated_at: string;
 }
 
