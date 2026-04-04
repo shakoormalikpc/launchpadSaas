@@ -29,7 +29,10 @@ Vite 5 + React 18 + TypeScript 5 | React Router v6 | Supabase (Auth, DB, Storage
 | `user_progress` | `user_id`, `lesson_id`, `status`, `score_post`, `score_post_total` |
 | `lesson_states` | `user_id`, `lesson_id`, `state` (jsonb), `messages` (jsonb) |
 
-**RPC:** `increment_used_seats(org_id_param)`  
+**RPC:**
+- `increment_used_seats(org_id_param uuid)` — increments `used_seats` on the org row
+- `get_bundle_seat_summary(org_id_param uuid)` → `TABLE(bundle_id uuid, bundle_name text, purchased int, assigned int, available int)` — per-bundle seat breakdown for an org; only returns bundles where `purchased > 0`
+
 **Storage:** `avatars` bucket (must be public — not automated)
 
 ## Key Hooks (`src/hooks/`)

@@ -62,12 +62,22 @@ interface LicenseRow {
   bundle_id: string | null;
 }
 
-/** Donut chart segment colors mapped to app design tokens */
-const CHART_COLORS = {
-  active: "hsl(142 71% 45%)",       // green-500 equivalent
-  pending: "hsl(28 95% 55%)",        // secondary (orange)
-  available: "hsl(160 84% 39%)",     // primary (teal-green)
-};
+interface BundleSeatSummary {
+  bundle_id: string;
+  bundle_name: string;
+  purchased: number;
+  assigned: number;
+  available: number;
+}
+
+/** Donut chart colors for per-bundle breakdown (cycles if more than 5 bundles) */
+const BUNDLE_COLORS = [
+  "hsl(160 84% 39%)",  // primary teal
+  "hsl(28 95% 55%)",   // secondary orange
+  "hsl(142 71% 45%)",  // green-500
+  "hsl(210 100% 56%)", // blue
+  "hsl(270 67% 55%)",  // purple
+];
 
 export default function AdminDashboard() {
   const { user, profile, signOut } = useAuth();
@@ -93,6 +103,12 @@ export default function AdminDashboard() {
 
   // Bundle name map for Participant Directory (bundle_id -> bundle name)
   const [bundleNames, setBundleNames] = useState<Record<string, string>>({});
+
+  // Per-bundle seat summary (from RPC get_bundle_seat_summary)
+  const [bundleSummary, setBundleSummary] = useState<BundleSeatSummary[]>([]);
+
+  // Selected bundle for the Assign New Seat form
+  const [assignBundleId, setAssignBundleId] = useState<string>("");
 
   // Read ?payment= URL param on mount
   useEffect(() => {
@@ -164,7 +180,25 @@ export default function AdminDashboard() {
     }
   };
 
-  // Effect 2: fetch licenses once orgId is set (runs after Effect 1 sets orgId)
+  /**
+   * Calls the get_bundle_seat_summary RPC to get per-bundle seat availability for the org.
+   * @param id - The organization's UUID.
+   * @returns Promise<void>
+   */
+  const fetchBundleSummary = async (id: string): Promise<void> => {
+    const { data, error } = await (supabase as any).rpc("get_bundle_seat_summary", {
+      org_id_param: id,
+    });
+
+    if (error) {
+      toast.error("Failed to load bundle seat summary.");
+      return;
+    }
+
+    setBundleSummary((data as BundleSeatSummary[]) ?? []);
+  };
+
+  // Effect 2: fetch licenses and bundle summary once orgId is set
   useEffect(() => {
     if (!orgId) return;
 
@@ -182,6 +216,7 @@ export default function AdminDashboard() {
         const rows = (licenses as LicenseRow[]) || [];
         setStudents(rows);
         await fetchBundleNamesForLicenses(rows);
+        await fetchBundleSummary(orgId);
       } catch {
         // no-op
       } finally {
@@ -194,7 +229,7 @@ export default function AdminDashboard() {
   }, [orgId]);
 
   /**
-   * Refreshes both org stats and licenses after a mutation (e.g. invite).
+   * Refreshes org stats, licenses, and bundle summary after a mutation (e.g. invite).
    * @returns Promise<void>
    */
   const fetchDashboardData = async (): Promise<void> => {
@@ -228,6 +263,7 @@ export default function AdminDashboard() {
       const rows = (licenses as LicenseRow[]) || [];
       setStudents(rows);
       await fetchBundleNamesForLicenses(rows);
+      await fetchBundleSummary(orgId);
     } catch {
       // no-op
     }
@@ -299,14 +335,21 @@ export default function AdminDashboard() {
   };
 
   /**
-   * Assigns a license to a new student email and sends the invite link.
+   * Assigns a license (for the selected bundle) to a new student email and sends the invite link.
    * @param e - Form submit event.
    * @returns Promise<void>
    */
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (stats.used >= stats.total) {
-      toast.error("No seats available. Please purchase more licenses.");
+
+    if (!assignBundleId) {
+      toast.error("Please select a bundle to assign.");
+      return;
+    }
+
+    const selectedSummary = bundleSummary.find((b) => b.bundle_id === assignBundleId);
+    if (!selectedSummary || selectedSummary.available <= 0) {
+      toast.error("No seats available for the selected bundle.");
       return;
     }
 
@@ -317,25 +360,11 @@ export default function AdminDashboard() {
         return;
       }
 
-      // Resolve bundle_id from the org's latest purchase
-      const { data: latestPurchase, error: purchaseError } = await supabase
-        .from("purchases")
-        .select("bundle_id")
-        .eq("org_id", orgId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (purchaseError || !latestPurchase?.bundle_id) {
-        toast.error("No active bundle found. Please buy seats first.");
-        return;
-      }
-
       const { error } = await supabase.from("licenses").insert({
         org_id: orgId,
         student_email: newStudentEmail,
         course_type: "Fundamentals",
-        bundle_id: latestPurchase.bundle_id,
+        bundle_id: assignBundleId,
       });
 
       if (error) throw error;
@@ -368,6 +397,7 @@ export default function AdminDashboard() {
       }
 
       setNewStudentEmail("");
+      setAssignBundleId("");
       fetchDashboardData();
     } catch (error: any) {
       toast.error(error.message || "Invitation failed");
@@ -392,16 +422,23 @@ export default function AdminDashboard() {
     ? (selectedBundle.price_per_seat * seatQuantity).toFixed(2)
     : null;
 
-  const activeCount = students.filter((s) => s.is_active).length;
-  const pendingCount = students.filter((s) => !s.is_active).length;
   const availableCount = Math.max(0, stats.total - stats.used);
   const usedPct = stats.total > 0 ? Math.round((stats.used / stats.total) * 100) : 0;
 
-  const chartData = [
-    { name: "Active", value: activeCount, color: CHART_COLORS.active },
-    { name: "Pending", value: pendingCount, color: CHART_COLORS.pending },
-    { name: "Available", value: availableCount, color: CHART_COLORS.available },
-  ].filter((d) => d.value > 0);
+  // Per-bundle chart: each bundle is one segment; value = total purchased seats
+  const chartData = bundleSummary
+    .filter((b) => b.purchased > 0)
+    .map((b, i) => ({
+      name: b.bundle_name,
+      value: b.purchased,
+      available: b.available,
+      color: BUNDLE_COLORS[i % BUNDLE_COLORS.length],
+    }));
+
+  // Bundles with seats still available (for Assign form dropdown)
+  const assignableBundles = bundleSummary.filter((b) => b.available > 0);
+  const noSeatsAvailable = bundleSummary.length > 0 && assignableBundles.length === 0;
+  const selectedAssignSummary = bundleSummary.find((b) => b.bundle_id === assignBundleId);
 
   if (loading)
     return (
@@ -587,11 +624,11 @@ export default function AdminDashboard() {
       {/* ── Chart + Invite Form ──────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
 
-        {/* Donut Chart */}
+        {/* Donut Chart — per-bundle breakdown */}
         <Card className="lg:col-span-2 border-none shadow-card bg-card">
           <CardHeader className="pb-2">
             <CardTitle className="text-lg font-display font-bold">Seat Overview</CardTitle>
-            <p className="text-muted-foreground text-sm">Distribution of your license pool</p>
+            <p className="text-muted-foreground text-sm">Available seats by bundle</p>
           </CardHeader>
           <CardContent>
             <div className="flex flex-col sm:flex-row items-center gap-6">
@@ -620,7 +657,10 @@ export default function AdminDashboard() {
                           borderRadius: "8px",
                           fontSize: "12px",
                         }}
-                        formatter={(value: number, name: string) => [value, name]}
+                        formatter={(value: number, name: string, props: any) => [
+                          `${props.payload.available} avail / ${value} total`,
+                          name,
+                        ]}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -631,32 +671,34 @@ export default function AdminDashboard() {
                 )}
               </div>
 
-              <div className="space-y-3 flex-1">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full shrink-0" style={{ background: CHART_COLORS.active }} />
-                    <span className="text-sm text-muted-foreground">Active</span>
-                  </div>
-                  <span className="text-sm font-bold text-foreground">{activeCount}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full shrink-0" style={{ background: CHART_COLORS.pending }} />
-                    <span className="text-sm text-muted-foreground">Pending</span>
-                  </div>
-                  <span className="text-sm font-bold text-foreground">{pendingCount}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full shrink-0" style={{ background: CHART_COLORS.available }} />
-                    <span className="text-sm text-muted-foreground">Available</span>
-                  </div>
-                  <span className="text-sm font-bold text-foreground">{availableCount}</span>
-                </div>
-                <div className="pt-2 border-t border-border flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Total</span>
-                  <span className="text-sm font-bold text-foreground">{stats.total}</span>
-                </div>
+              <div className="space-y-3 flex-1 min-w-0">
+                {chartData.length > 0 ? (
+                  <>
+                    {chartData.map((entry, i) => (
+                      <div key={i} className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-3 h-3 rounded-full shrink-0" style={{ background: entry.color }} />
+                          <span className="text-sm text-muted-foreground truncate">{entry.name}</span>
+                        </div>
+                        <span className="text-sm font-bold text-foreground shrink-0 whitespace-nowrap">
+                          {entry.available} / {entry.value}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="pt-2 border-t border-border flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
+                        avail / total
+                      </span>
+                      <span className="text-sm font-bold text-foreground">
+                        {availableCount} / {stats.total}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No bundles purchased yet.
+                  </p>
+                )}
               </div>
             </div>
           </CardContent>
@@ -676,59 +718,99 @@ export default function AdminDashboard() {
             </div>
           </CardHeader>
           <CardContent className="pt-4">
-            <form onSubmit={handleInvite} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  Student Email Address
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input
-                    type="email"
-                    placeholder="student@example.com"
-                    value={newStudentEmail}
-                    onChange={(e) => setNewStudentEmail(e.target.value)}
-                    required
-                    className="pl-9"
-                  />
+            {noSeatsAvailable ? (
+              <div className="flex flex-col items-center gap-4 py-6 text-center">
+                <div className="w-12 h-12 rounded-xl bg-destructive/10 flex items-center justify-center">
+                  <UserPlus className="h-6 w-6 text-destructive" />
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  An invitation link will be generated and sent to this address.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-between p-3 rounded-xl bg-muted/60">
-                <div className="text-sm">
-                  <span className="text-muted-foreground">Available seats: </span>
-                  <span className={`font-bold ${availableCount === 0 ? "text-destructive" : "text-foreground"}`}>
-                    {availableCount}
-                  </span>
+                <div>
+                  <p className="font-semibold text-foreground">No seats available</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    All purchased seats are assigned. Buy more seats to invite new students.
+                  </p>
                 </div>
-                {availableCount === 0 && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="text-xs h-7"
-                    onClick={handleOpenBuyDialog}
-                  >
-                    Buy More
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleOpenBuyDialog}
+                >
+                  <CreditCard className="mr-2 h-4 w-4" /> Purchase More Seats
+                </Button>
               </div>
+            ) : (
+              <form onSubmit={handleInvite} className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    Course Bundle
+                  </label>
+                  <Select value={assignBundleId} onValueChange={setAssignBundleId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a bundle…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assignableBundles.map((b) => (
+                        <SelectItem key={b.bundle_id} value={b.bundle_id}>
+                          {b.bundle_name} — {b.available} seat{b.available !== 1 ? "s" : ""} available
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {assignableBundles.length === 0 && bundleSummary.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      No bundles found. Purchase seats first.
+                    </p>
+                  )}
+                </div>
 
-              <Button
-                type="submit"
-                className="w-full bg-primary hover:opacity-90 shadow-soft font-semibold"
-                disabled={inviting || availableCount === 0}
-              >
-                {inviting ? (
-                  <><Loader2 className="animate-spin mr-2 h-4 w-4" /> Sending Invite…</>
-                ) : (
-                  <><UserPlus className="mr-2 h-4 w-4" /> Assign License &amp; Send Invite</>
-                )}
-              </Button>
-            </form>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    Student Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      type="email"
+                      placeholder="student@example.com"
+                      value={newStudentEmail}
+                      onChange={(e) => setNewStudentEmail(e.target.value)}
+                      required
+                      className="pl-9"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    An invitation link will be generated and sent to this address.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-xl bg-muted/60">
+                  <div className="text-sm">
+                    {selectedAssignSummary ? (
+                      <>
+                        <span className="text-muted-foreground">Available for this bundle: </span>
+                        <span className="font-bold text-foreground">{selectedAssignSummary.available}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-muted-foreground">Total available seats: </span>
+                        <span className="font-bold text-foreground">{availableCount}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <Button
+                  type="submit"
+                  className="w-full bg-primary hover:opacity-90 shadow-soft font-semibold"
+                  disabled={inviting || !assignBundleId}
+                >
+                  {inviting ? (
+                    <><Loader2 className="animate-spin mr-2 h-4 w-4" /> Sending Invite…</>
+                  ) : (
+                    <><UserPlus className="mr-2 h-4 w-4" /> Assign License &amp; Send Invite</>
+                  )}
+                </Button>
+              </form>
+            )}
           </CardContent>
         </Card>
       </div>
