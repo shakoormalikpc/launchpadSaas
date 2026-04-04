@@ -8,6 +8,7 @@ import { ChatInput } from "./ChatInput";
 import { QuickReplies } from "./QuickReplies";
 import { LessonSelector } from "./LessonSelector";
 import { ProgressDashboard } from "./ProgressDashboard";
+import { IntroVideoModal } from "./IntroVideoModal";
 import { useChatbot } from "@/hooks/useChatbot";
 import { useLesson2Chatbot } from "@/hooks/useLesson2Chatbot";
 import { useGenericLesson } from "@/hooks/useGenericLesson";
@@ -20,6 +21,8 @@ import { Rocket, ArrowLeft, Building2 } from "lucide-react";
 import { lessons } from "@/data/lessons";
 import launchpadLogo from "@/assets/launchpad-logo.png";
 
+const INTRO_VIDEO_SEEN_KEY = "intro_video_seen";
+
 type ViewState = "menu" | string; // "menu" or lessonId
 
 export const ChatContainer = () => {
@@ -29,6 +32,23 @@ export const ChatContainer = () => {
   const [viewState, setViewState] = useState<ViewState>("menu");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
   const lastRecordedCompletionId = useRef<string | null>(null);
+
+  // Intro video: show once for students only
+  const [showIntroVideo, setShowIntroVideo] = useState(false);
+
+  useEffect(() => {
+    if (
+      profile?.role === "student" &&
+      localStorage.getItem(INTRO_VIDEO_SEEN_KEY) !== "true"
+    ) {
+      setShowIntroVideo(true);
+    }
+  }, [profile?.role]);
+
+  const handleIntroVideoClose = useCallback(() => {
+    setShowIntroVideo(false);
+    localStorage.setItem(INTRO_VIDEO_SEEN_KEY, "true");
+  }, []);
 
   // Progress tracking
   const {
@@ -214,6 +234,7 @@ export const ChatContainer = () => {
   if (viewState === "menu") {
     return (
       <div className="flex flex-col h-screen max-h-screen bg-background">
+        <IntroVideoModal open={showIntroVideo} onClose={handleIntroVideoClose} />
         <ChatHeader />
 
         <div className="flex-1 overflow-y-auto p-4 pt-6 flex flex-col items-center justify-start">

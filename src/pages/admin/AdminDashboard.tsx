@@ -25,6 +25,13 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+import {
   Users,
   UserPlus,
   CreditCard,
@@ -35,6 +42,8 @@ import {
   Copy,
   Check,
   LogOut,
+  Mail,
+  Building2,
 } from "lucide-react";
 
 interface CourseBundle {
@@ -52,6 +61,13 @@ interface LicenseRow {
   user_id: string | null;
   bundle_id: string | null;
 }
+
+/** Donut chart segment colors mapped to app design tokens */
+const CHART_COLORS = {
+  active: "hsl(142 71% 45%)",       // green-500 equivalent
+  pending: "hsl(28 95% 55%)",        // secondary (orange)
+  available: "hsl(160 84% 39%)",     // primary (teal-green)
+};
 
 export default function AdminDashboard() {
   const { user, profile, signOut } = useAuth();
@@ -360,6 +376,7 @@ export default function AdminDashboard() {
     }
   };
 
+  const adminFirstName = profile?.first_name || null;
   const adminDisplayName = profile
     ? `${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim() || user?.email
     : user?.email;
@@ -375,54 +392,78 @@ export default function AdminDashboard() {
     ? (selectedBundle.price_per_seat * seatQuantity).toFixed(2)
     : null;
 
+  const activeCount = students.filter((s) => s.is_active).length;
+  const pendingCount = students.filter((s) => !s.is_active).length;
+  const availableCount = Math.max(0, stats.total - stats.used);
+  const usedPct = stats.total > 0 ? Math.round((stats.used / stats.total) * 100) : 0;
+
+  const chartData = [
+    { name: "Active", value: activeCount, color: CHART_COLORS.active },
+    { name: "Pending", value: pendingCount, color: CHART_COLORS.pending },
+    { name: "Available", value: availableCount, color: CHART_COLORS.available },
+  ].filter((d) => d.value > 0);
+
   if (loading)
     return (
-      <div className="flex h-screen items-center justify-center">
-        <Loader2 className="animate-spin" />
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="animate-spin h-8 w-8 text-primary" />
       </div>
     );
 
   return (
     <div className="min-h-screen bg-background p-6 lg:p-10 space-y-8 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-4xl font-display font-bold tracking-tight">
-            Org Command Center
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Manage your student licenses and track learning progress.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* Admin profile chip */}
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-card border border-border text-sm">
-            <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
-              {(profile?.first_name?.[0] ?? user?.email?.[0] ?? "A").toUpperCase()}
+
+      {/* ── Hero Header ─────────────────────────────────────────────── */}
+      <div className="rounded-2xl overflow-hidden shadow-soft"
+           style={{ background: "linear-gradient(135deg, hsl(160 84% 39%), hsl(180 70% 45%))" }}>
+        <div className="px-6 py-8 lg:px-10 lg:py-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Building2 className="h-4 w-4 text-primary-foreground/70" />
+              <span className="text-primary-foreground/70 text-xs font-semibold uppercase tracking-widest">
+                {orgName || "Organization"}
+              </span>
             </div>
-            <div className="leading-tight">
-              <p className="font-semibold text-foreground truncate max-w-[140px]">{adminDisplayName}</p>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{orgName || "Admin"}</p>
-            </div>
+            <h1 className="text-3xl lg:text-4xl font-display font-bold text-primary-foreground">
+              Welcome back{adminFirstName ? `, ${adminFirstName}` : ""}!
+            </h1>
+            <p className="text-primary-foreground/75 mt-1 text-sm">
+              Here's what's happening with your program today.
+            </p>
           </div>
-          <Button
-            className="bg-primary hover:opacity-90 shadow-lg shadow-primary/20"
-            onClick={handleOpenBuyDialog}
-          >
-            <CreditCard className="mr-2 h-4 w-4" /> Buy More Seats
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={signOut}
-            title="Sign out"
-          >
-            <LogOut className="h-4 w-4" />
-          </Button>
+
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Admin chip */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-xl bg-white/15 backdrop-blur-sm border border-white/20 text-sm text-primary-foreground">
+              <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center font-bold text-sm">
+                {(profile?.first_name?.[0] ?? user?.email?.[0] ?? "A").toUpperCase()}
+              </div>
+              <div className="leading-tight">
+                <p className="font-semibold truncate max-w-[120px]">{adminDisplayName}</p>
+                <p className="text-[10px] text-primary-foreground/60 uppercase tracking-wider">Admin</p>
+              </div>
+            </div>
+
+            <Button
+              className="bg-white/20 hover:bg-white/30 text-primary-foreground border border-white/30 backdrop-blur-sm shadow-none font-semibold"
+              onClick={handleOpenBuyDialog}
+            >
+              <CreditCard className="mr-2 h-4 w-4" /> Buy More Seats
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={signOut}
+              title="Sign out"
+              className="text-primary-foreground hover:bg-white/20 border border-white/20"
+            >
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Buy Seats Dialog */}
+      {/* ── Buy Seats Dialog ─────────────────────────────────────────── */}
       <Dialog open={buyDialogOpen} onOpenChange={setBuyDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -430,13 +471,9 @@ export default function AdminDashboard() {
           </DialogHeader>
 
           <div className="space-y-5 py-2">
-            {/* Bundle select */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Course Bundle</label>
-              <Select
-                value={selectedBundleId}
-                onValueChange={setSelectedBundleId}
-              >
+              <Select value={selectedBundleId} onValueChange={setSelectedBundleId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select a bundle…" />
                 </SelectTrigger>
@@ -450,7 +487,6 @@ export default function AdminDashboard() {
               </Select>
             </div>
 
-            {/* Quantity input */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Number of Seats</label>
               <Input
@@ -463,236 +499,381 @@ export default function AdminDashboard() {
               />
             </div>
 
-            {/* Total price */}
             {totalPrice !== null && (
               <p className="text-sm text-muted-foreground">
                 Total:{" "}
-                <span className="font-semibold text-foreground">
-                  ${totalPrice}
-                </span>
+                <span className="font-semibold text-foreground">${totalPrice}</span>
               </p>
             )}
           </div>
 
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setBuyDialogOpen(false)}
-              disabled={checkingOut}
-            >
+            <Button variant="outline" onClick={() => setBuyDialogOpen(false)} disabled={checkingOut}>
               Cancel
             </Button>
-            <Button
-              disabled={!selectedBundleId || checkingOut}
-              onClick={handleConfirmPurchase}
-            >
-              {checkingOut ? (
-                <Loader2 className="animate-spin mr-2 h-4 w-4" />
-              ) : null}
+            <Button disabled={!selectedBundleId || checkingOut} onClick={handleConfirmPurchase}>
+              {checkingOut ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : null}
               Confirm &amp; Pay
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Stats Grid */}
+      {/* ── Stats Grid ───────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+        {/* Total Licenses */}
         <Card className="border-none shadow-card bg-card">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">
-              Total Licenses
-            </CardTitle>
-            <Users className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{stats.total}</div>
+          <CardContent className="p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                <Users className="h-6 w-6 text-primary" />
+              </div>
+              <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground text-right leading-tight">
+                Total<br />Licenses
+              </span>
+            </div>
+            <div className="text-5xl font-display font-bold text-foreground">{stats.total}</div>
+            <p className="text-muted-foreground text-sm mt-1">Purchased seats</p>
           </CardContent>
         </Card>
+
+        {/* Active Students */}
         <Card className="border-none shadow-card bg-card">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">
-              Active Students
-            </CardTitle>
-            <GraduationCap className="h-4 w-4 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{stats.used}</div>
+          <CardContent className="p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-12 h-12 rounded-xl bg-green-500/10 flex items-center justify-center">
+                <GraduationCap className="h-6 w-6 text-green-500" />
+              </div>
+              <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground text-right leading-tight">
+                Active<br />Students
+              </span>
+            </div>
+            <div className="text-5xl font-display font-bold text-foreground">{stats.used}</div>
+            <div className="mt-4">
+              <div className="flex justify-between text-xs text-muted-foreground mb-1.5">
+                <span>Seats used</span>
+                <span className="font-semibold text-foreground">{usedPct}%</span>
+              </div>
+              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-green-500 rounded-full transition-all duration-500"
+                  style={{ width: `${usedPct}%` }}
+                />
+              </div>
+            </div>
           </CardContent>
         </Card>
+
+        {/* Available Seats */}
         <Card className="border-none shadow-card bg-card">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">
-              Available Seats
-            </CardTitle>
-            <UserPlus className="h-4 w-4 text-orange-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{stats.total - stats.used}</div>
+          <CardContent className="p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-12 h-12 rounded-xl bg-secondary/10 flex items-center justify-center">
+                <UserPlus className="h-6 w-6 text-secondary" />
+              </div>
+              <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground text-right leading-tight">
+                Available<br />Seats
+              </span>
+            </div>
+            <div className="text-5xl font-display font-bold text-foreground">{availableCount}</div>
+            <p className="text-muted-foreground text-sm mt-1">
+              {availableCount === 0 ? "All seats assigned" : "Ready to assign"}
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Invite Form */}
-        <Card className="lg:col-span-1 border-none shadow-card bg-card/50 backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="text-xl font-bold">Assign New Seat</CardTitle>
+      {/* ── Chart + Invite Form ──────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+
+        {/* Donut Chart */}
+        <Card className="lg:col-span-2 border-none shadow-card bg-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg font-display font-bold">Seat Overview</CardTitle>
+            <p className="text-muted-foreground text-sm">Distribution of your license pool</p>
           </CardHeader>
           <CardContent>
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              <div className="w-40 h-40 shrink-0">
+                {chartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={chartData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={44}
+                        outerRadius={68}
+                        paddingAngle={3}
+                        dataKey="value"
+                        strokeWidth={0}
+                      >
+                        {chartData.map((entry, index) => (
+                          <Cell key={index} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          background: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                        }}
+                        formatter={(value: number, name: string) => [value, name]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="w-full h-full rounded-full bg-muted flex items-center justify-center text-xs text-muted-foreground">
+                    No data
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3 flex-1">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full shrink-0" style={{ background: CHART_COLORS.active }} />
+                    <span className="text-sm text-muted-foreground">Active</span>
+                  </div>
+                  <span className="text-sm font-bold text-foreground">{activeCount}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full shrink-0" style={{ background: CHART_COLORS.pending }} />
+                    <span className="text-sm text-muted-foreground">Pending</span>
+                  </div>
+                  <span className="text-sm font-bold text-foreground">{pendingCount}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full shrink-0" style={{ background: CHART_COLORS.available }} />
+                    <span className="text-sm text-muted-foreground">Available</span>
+                  </div>
+                  <span className="text-sm font-bold text-foreground">{availableCount}</span>
+                </div>
+                <div className="pt-2 border-t border-border flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Total</span>
+                  <span className="text-sm font-bold text-foreground">{stats.total}</span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Assign New Seat form */}
+        <Card className="lg:col-span-3 border-none shadow-card bg-card">
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                <Mail className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle className="text-lg font-display font-bold">Assign New Seat</CardTitle>
+                <p className="text-muted-foreground text-sm">Student will receive an invite link via email</p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-4">
             <form onSubmit={handleInvite} className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">
+                <label className="text-sm font-medium text-foreground">
                   Student Email Address
                 </label>
-                <Input
-                  type="email"
-                  placeholder="student@example.com"
-                  value={newStudentEmail}
-                  onChange={(e) => setNewStudentEmail(e.target.value)}
-                  required
-                />
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    type="email"
+                    placeholder="student@example.com"
+                    value={newStudentEmail}
+                    onChange={(e) => setNewStudentEmail(e.target.value)}
+                    required
+                    className="pl-9"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  An invitation link will be generated and sent to this address.
+                </p>
               </div>
-              <Button type="submit" className="w-full" disabled={inviting}>
+
+              <div className="flex items-center justify-between p-3 rounded-xl bg-muted/60">
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Available seats: </span>
+                  <span className={`font-bold ${availableCount === 0 ? "text-destructive" : "text-foreground"}`}>
+                    {availableCount}
+                  </span>
+                </div>
+                {availableCount === 0 && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-7"
+                    onClick={handleOpenBuyDialog}
+                  >
+                    Buy More
+                  </Button>
+                )}
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full bg-primary hover:opacity-90 shadow-soft font-semibold"
+                disabled={inviting || availableCount === 0}
+              >
                 {inviting ? (
-                  <Loader2 className="animate-spin" />
+                  <><Loader2 className="animate-spin mr-2 h-4 w-4" /> Sending Invite…</>
                 ) : (
-                  "Assign License"
+                  <><UserPlus className="mr-2 h-4 w-4" /> Assign License &amp; Send Invite</>
                 )}
               </Button>
             </form>
           </CardContent>
         </Card>
+      </div>
 
-        {/* Students Table */}
-        <Card className="lg:col-span-2 border-none shadow-card bg-card">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-xl font-bold">
-              Participant Directory
-            </CardTitle>
-            <div className="relative w-48">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search..."
-                className="pl-8 h-9 text-xs"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="border-b border-border text-muted-foreground text-xs uppercase tracking-wider">
-                    <th className="pb-3 font-semibold">Student Email</th>
-                    <th className="pb-3 font-semibold">Course</th>
-                    <th className="pb-3 font-semibold">Bundle</th>
-                    <th className="pb-3 font-semibold text-right">Status</th>
-                    <th className="pb-3 font-semibold text-right">Invite</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredStudents.map((s) => {
-                    return (
-                      <tr
-                        key={s.id}
-                        className="text-sm hover:bg-muted/50 transition-colors"
-                      >
-                        <td className="py-4">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground shrink-0">
-                              {s.student_email[0].toUpperCase()}
-                            </div>
-                            <p className="font-medium truncate">{s.student_email}</p>
+      {/* ── Participant Directory ────────────────────────────────────── */}
+      <Card className="border-none shadow-card bg-card">
+        <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-3">
+          <div>
+            <CardTitle className="text-xl font-display font-bold">Participant Directory</CardTitle>
+            <p className="text-muted-foreground text-sm mt-0.5">
+              {filteredStudents.length} of {students.length} participant{students.length !== 1 ? "s" : ""}
+              {searchQuery ? " match your search" : " total"}
+            </p>
+          </div>
+          <div className="relative w-52">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search participants…"
+              className="pl-9 h-9 text-sm"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-muted/40 text-muted-foreground text-xs uppercase tracking-widest">
+                  <th className="py-3 pl-6 pr-4 font-semibold">Student</th>
+                  <th className="py-3 px-4 font-semibold">Course</th>
+                  <th className="py-3 px-4 font-semibold">Bundle</th>
+                  <th className="py-3 px-4 font-semibold text-right">Status</th>
+                  <th className="py-3 pl-4 pr-6 font-semibold text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredStudents.map((s, idx) => {
+                  const initial = s.student_email[0].toUpperCase();
+                  const isEven = idx % 2 === 0;
+                  return (
+                    <tr
+                      key={s.id}
+                      className={`text-sm transition-colors hover:bg-primary/5 ${isEven ? "bg-card" : "bg-muted/20"}`}
+                    >
+                      <td className="py-3.5 pl-6 pr-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                            {initial}
                           </div>
-                        </td>
-                        <td className="py-4 text-muted-foreground">
-                          {s.course_type}
-                        </td>
-                        <td className="py-4">
-                          {s.bundle_id && bundleNames[s.bundle_id] ? (
-                            <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-primary/10 text-primary">
-                              {bundleNames[s.bundle_id]}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground/50">—</span>
-                          )}
-                        </td>
-                        <td className="py-4 text-right">
-                          <span
-                            className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                              s.is_active
-                                ? "bg-green-500/10 text-green-500"
-                                : "bg-orange-500/10 text-orange-500"
-                            }`}
-                          >
-                            {s.is_active ? "Active" : "Pending"}
+                          <span className="font-medium text-foreground truncate max-w-[200px]">
+                            {s.student_email}
                           </span>
-                        </td>
-                        <td className="py-4 text-right">
-                          {!s.is_active && (
-                            <Popover
-                              open={openPopoverId === s.id}
-                              onOpenChange={(open) =>
-                                setOpenPopoverId(open ? s.id : null)
-                              }
-                            >
-                              <PopoverTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1">
-                                  <Link className="h-3 w-3" />
-                                  Share Link
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-4 text-muted-foreground text-sm">
+                        {s.course_type}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        {s.bundle_id && bundleNames[s.bundle_id] ? (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-primary/10 text-primary tracking-wide">
+                            {bundleNames[s.bundle_id]}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground/40">—</span>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <span
+                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide ${
+                            s.is_active
+                              ? "bg-green-500/10 text-green-600"
+                              : "bg-secondary/10 text-secondary"
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${s.is_active ? "bg-green-500" : "bg-secondary"}`} />
+                          {s.is_active ? "Active" : "Pending"}
+                        </span>
+                      </td>
+                      <td className="py-3.5 pl-4 pr-6 text-right">
+                        {!s.is_active && (
+                          <Popover
+                            open={openPopoverId === s.id}
+                            onOpenChange={(open) => setOpenPopoverId(open ? s.id : null)}
+                          >
+                            <PopoverTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-7 px-2.5 text-xs gap-1.5 text-primary hover:text-primary hover:bg-primary/10">
+                                <Link className="h-3 w-3" />
+                                Share Link
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-80 p-3" align="end">
+                              <p className="text-xs font-medium mb-2 text-foreground">
+                                Signup link for <span className="text-primary">{s.student_email}</span>
+                              </p>
+                              <div className="flex gap-2">
+                                <Input
+                                  readOnly
+                                  value={`${window.location.origin}/signup?email=${encodeURIComponent(s.student_email)}`}
+                                  className="h-8 text-xs"
+                                />
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className={`h-8 shrink-0 transition-colors ${copiedId === s.id ? "text-green-600 border-green-500 bg-green-500/5" : ""}`}
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(
+                                      `${window.location.origin}/signup?email=${encodeURIComponent(s.student_email)}`
+                                    );
+                                    setCopiedId(s.id);
+                                    setTimeout(() => setCopiedId(null), 2000);
+                                  }}
+                                >
+                                  {copiedId === s.id ? (
+                                    <><Check className="h-3 w-3 mr-1" />Copied</>
+                                  ) : (
+                                    <><Copy className="h-3 w-3 mr-1" />Copy</>
+                                  )}
                                 </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-80 p-3" align="end">
-                                <p className="text-xs font-medium mb-2">Signup link for {s.student_email}</p>
-                                <div className="flex gap-2">
-                                  <Input
-                                    readOnly
-                                    value={`${window.location.origin}/signup?email=${encodeURIComponent(s.student_email)}`}
-                                    className="h-8 text-xs"
-                                  />
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className={`h-8 shrink-0 transition-colors ${copiedId === s.id ? "text-green-500 border-green-500" : ""}`}
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(
-                                        `${window.location.origin}/signup?email=${encodeURIComponent(s.student_email)}`
-                                      );
-                                      setCopiedId(s.id);
-                                      setTimeout(() => setCopiedId(null), 2000);
-                                    }}
-                                  >
-                                    {copiedId === s.id ? (
-                                      <><Check className="h-3 w-3 mr-1" />Copied</>
-                                    ) : (
-                                      <><Copy className="h-3 w-3 mr-1" />Copy</>
-                                    )}
-                                  </Button>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {filteredStudents.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="py-10 text-center text-muted-foreground italic"
-                      >
-                        {searchQuery ? "No students match your search." : "No students assigned yet."}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        )}
                       </td>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+                  );
+                })}
+                {filteredStudents.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-16 text-center">
+                      <div className="flex flex-col items-center gap-2">
+                        <Users className="h-8 w-8 text-muted-foreground/30" />
+                        <p className="text-muted-foreground text-sm">
+                          {searchQuery ? "No participants match your search." : "No participants assigned yet."}
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
     </div>
   );
 }
