@@ -28,6 +28,8 @@ export default function CompleteProfile() {
     const [saving, setSaving] = useState(false);
     const [firstName, setFirstName] = useState("");
     const [lastName, setLastName] = useState("");
+    // Hard timeout: if auth/profile never resolves within 3 s, force-show the form.
+    const [timedOut, setTimedOut] = useState(false);
 
     // Track whether we've ever observed authLoading=true in this mount.
     //
@@ -44,6 +46,11 @@ export default function CompleteProfile() {
     useEffect(() => {
         if (authLoading) seenLoadingRef.current = true;
     }, [authLoading]);
+
+    useEffect(() => {
+        const id = setTimeout(() => setTimedOut(true), 3000);
+        return () => clearTimeout(id);
+    }, []);
 
     // "Profile resolved" means we've confirmed the profile fetch has finished.
     // Either:
@@ -105,7 +112,7 @@ export default function CompleteProfile() {
 
     // Show spinner while auth is loading OR while profile fetch is still in-flight
     // (covers the SIGNED_IN race where authLoading never goes true).
-    if (authLoading || !profileResolved) {
+    if (!timedOut && (authLoading || !profileResolved)) {
         return (
             <div className="w-full min-h-screen flex items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
