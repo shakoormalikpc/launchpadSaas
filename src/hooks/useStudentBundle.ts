@@ -42,6 +42,7 @@ interface UseStudentBundleResult {
   allowedLessonIds: string[];
   bundleName: string | null;
   loading: boolean;
+  isExpired: boolean;
 }
 
 /**
@@ -61,17 +62,20 @@ export function useStudentBundle(
   const [allowedLessonIds, setAllowedLessonIds] = useState<string[]>(ALL_LESSON_IDS);
   const [bundleName, setBundleName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isExpired, setIsExpired] = useState(false);
 
   useEffect(() => {
     // Org admins always see all lessons; no fetch needed.
     if (role === "org_admin") {
       setAllowedLessonIds(ALL_LESSON_IDS);
+      setIsExpired(false);
       setLoading(false);
       return;
     }
 
     if (!studentEmail) {
       setAllowedLessonIds(ALL_LESSON_IDS);
+      setIsExpired(false);
       setLoading(false);
       return;
     }
@@ -83,7 +87,7 @@ export function useStudentBundle(
 
       const { data: license, error: licErr } = await supabase
         .from("licenses")
-        .select("bundle_id")
+        .select("bundle_id, expires_at")
         .eq("student_email", studentEmail)
         .eq("is_active", true)
         .limit(1)
@@ -94,6 +98,15 @@ export function useStudentBundle(
       if (licErr || !license?.bundle_id) {
         // No license found – grant all lessons so the user isn't blocked.
         setAllowedLessonIds(ALL_LESSON_IDS);
+        setIsExpired(false);
+        setLoading(false);
+        return;
+      }
+
+      // If expires_at is set and in the past, lock all lessons.
+      if (license.expires_at && new Date(license.expires_at) < new Date()) {
+        setAllowedLessonIds([]);
+        setIsExpired(true);
         setLoading(false);
         return;
       }
@@ -108,6 +121,7 @@ export function useStudentBundle(
 
       if (bundleErr || !bundle?.name) {
         setAllowedLessonIds(ALL_LESSON_IDS);
+        setIsExpired(false);
         setLoading(false);
         return;
       }
@@ -115,6 +129,7 @@ export function useStudentBundle(
       const name = bundle.name as string;
       setBundleName(name);
       setAllowedLessonIds(BUNDLE_LESSONS[name] ?? ALL_LESSON_IDS);
+      setIsExpired(false);
       setLoading(false);
     };
 
@@ -125,5 +140,5 @@ export function useStudentBundle(
     };
   }, [studentEmail, role]);
 
-  return { allowedLessonIds, bundleName, loading };
+  return { allowedLessonIds, bundleName, loading, isExpired };
 }

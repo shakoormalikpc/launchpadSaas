@@ -10,6 +10,7 @@ interface RequestBody {
   org_id: string;
   bundle_id: string;
   quantity: number;
+  subscription_type?: string;
 }
 
 interface CourseBundle {
@@ -31,7 +32,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    const { org_id, bundle_id, quantity }: RequestBody = await req.json();
+    const { org_id, bundle_id, quantity, subscription_type }: RequestBody = await req.json();
 
     if (!org_id || !bundle_id || !quantity || quantity < 1) {
       return new Response(
@@ -52,6 +53,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+
+    // Resolve admin email from the request JWT for Stripe customer creation
+    const authHeader = req.headers.get("Authorization");
+    const jwt = authHeader?.split(" ")[1] ?? "";
+    let adminEmail: string | undefined;
+    try {
+      const { data: authData } = await supabase.auth.getUser(jwt);
+      adminEmail = authData.user?.email ?? undefined;
+    } catch {
+      // Non-fatal — Stripe checkout works without customer_email
+    }
 
     const { data: bundle, error: bundleError } = await supabase
       .from("course_bundles")
@@ -75,31 +87,71 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const typedBundle = bundle as CourseBundle;
     const stripe = new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" });
-
     const appUrl = Deno.env.get("APP_URL") ?? "http://localhost:8080";
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: typedBundle.name,
+    const sharedMetadata = {
+      org_id,
+      bundle_id,
+      quantity: String(quantity),
+      subscription_type: subscription_type ?? "academic_year",
+    };
+
+    const customerParam = adminEmail ? { customer_email: adminEmail } : {};
+
+    let session: Stripe.Checkout.Session;
+
+    if (subscription_type === "academic_year") {
+      // ── Monthly recurring subscription, auto-cancels after 10 months ──
+      const cancelAt = new Date();
+      cancelAt.setMonth(cancelAt.getMonth() + 10);
+
+      session = await stripe.checkout.sessions.create({
+        mode: "subscription",
+        ...customerParam,
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: `${typedBundle.name} — Academic Year (per seat / month)`,
+              },
+              unit_amount: Math.round(typedBundle.price_per_seat * 100),
+              recurring: { interval: "month" },
             },
-            unit_amount: Math.round(typedBundle.price_per_seat * 100),
+            quantity,
           },
-          quantity,
+        ],
+        // Embed org context in subscription metadata so webhook events can find the org
+        subscription_data: {
+          cancel_at: Math.floor(cancelAt.getTime() / 1000),
+          metadata: sharedMetadata,
         },
-      ],
-      metadata: {
-        org_id,
-        bundle_id,
-        quantity: String(quantity),
-      },
-      success_url: `${appUrl}/admin-dashboard?payment=success`,
-      cancel_url: `${appUrl}/admin-dashboard?payment=cancelled`,
-    });
+        metadata: sharedMetadata,
+        success_url: `${appUrl}/admin-dashboard?payment=success`,
+        cancel_url: `${appUrl}/admin-dashboard?payment=cancelled`,
+      });
+    } else {
+      // ── Summer Camp: one-time payment, 6-week access ──
+      session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        ...customerParam,
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: `${typedBundle.name} — Summer Camp / Youth Development (6 weeks)`,
+              },
+              unit_amount: Math.round(typedBundle.price_per_seat * 100),
+            },
+            quantity,
+          },
+        ],
+        metadata: sharedMetadata,
+        success_url: `${appUrl}/admin-dashboard?payment=success`,
+        cancel_url: `${appUrl}/admin-dashboard?payment=cancelled`,
+      });
+    }
 
     return new Response(JSON.stringify({ url: session.url }), {
       status: 200,

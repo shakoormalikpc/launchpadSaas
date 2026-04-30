@@ -17,7 +17,7 @@ import { getLessonData, isGenericLesson } from "@/data/lessonDataLoader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
-import { Rocket, ArrowLeft, Building2 } from "lucide-react";
+import { Rocket, ArrowLeft, Building2, AlertTriangle } from "lucide-react";
 import { lessons } from "@/data/lessons";
 import launchpadLogo from "@/assets/launchpad-logo.png";
 
@@ -28,7 +28,7 @@ type ViewState = "menu" | string; // "menu" or lessonId
 export const ChatContainer = () => {
   const { profile, user } = useAuth();
   const { orgName } = useOrgName(user?.email);
-  const { allowedLessonIds } = useStudentBundle(user?.email, profile?.role);
+  const { allowedLessonIds, isExpired } = useStudentBundle(user?.email, profile?.role);
   const [viewState, setViewState] = useState<ViewState>("menu");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
   const lastRecordedCompletionId = useRef<string | null>(null);
@@ -258,6 +258,19 @@ export const ChatContainer = () => {
                 <Building2 className="h-4 w-4 text-primary shrink-0" />
                 <span className="text-sm font-semibold text-primary">{orgName}</span>
                 <Badge variant="secondary" className="text-xs">Member</Badge>
+              </div>
+            )}
+
+            {/* Subscription expired banner */}
+            {isExpired && (
+              <div className="w-full max-w-lg mb-6 flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3">
+                <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-destructive">Subscription Expired</p>
+                  <p className="text-sm text-destructive/80 mt-0.5">
+                    Your subscription has expired. Please contact your organization admin to renew.
+                  </p>
+                </div>
               </div>
             )}
 

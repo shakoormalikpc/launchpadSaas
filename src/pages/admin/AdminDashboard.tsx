@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { CertificateModal, type CertificateStudent } from "@/components/admin/CertificateModal";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +46,14 @@ import {
   LogOut,
   Mail,
   Building2,
+  BarChart2,
+  Clock,
+  AlertTriangle,
+  Calendar,
+  Shield,
+  Award,
+  CalendarDays,
+  Timer,
 } from "lucide-react";
 
 interface CourseBundle {
@@ -60,6 +70,20 @@ interface LicenseRow {
   is_active: boolean;
   user_id: string | null;
   bundle_id: string | null;
+  expires_at: string | null;
+  subscription_type: string | null;
+}
+
+interface StudentProgressRow {
+  student_email: string;
+  student_first_name: string;
+  student_last_name: string;
+  bundle_name: string | null;
+  lessons_completed: number;
+  total_lessons: number;
+  average_score: number;
+  last_activity: string | null;
+  expires_at: string | null;
 }
 
 interface BundleSeatSummary {
@@ -100,6 +124,7 @@ export default function AdminDashboard() {
   const [selectedBundleId, setSelectedBundleId] = useState<string>("");
   const [seatQuantity, setSeatQuantity] = useState(1);
   const [checkingOut, setCheckingOut] = useState(false);
+  const [subscriptionType, setSubscriptionType] = useState<string>("academic_year");
 
   // Bundle name map for Participant Directory (bundle_id -> bundle name)
   const [bundleNames, setBundleNames] = useState<Record<string, string>>({});
@@ -109,6 +134,20 @@ export default function AdminDashboard() {
 
   // Selected bundle for the Assign New Seat form
   const [assignBundleId, setAssignBundleId] = useState<string>("");
+
+  // Student progress summary (Feature 2)
+  const [studentProgress, setStudentProgress] = useState<StudentProgressRow[]>([]);
+
+  // Subscription status (populated from org row)
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string>("none");
+  const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null);
+  const [openingPortal, setOpeningPortal] = useState(false);
+
+  // Org creation date (for "Member Since")
+  const [orgCreatedAt, setOrgCreatedAt] = useState<string | null>(null);
+
+  // Certificate modal
+  const [certStudent, setCertStudent] = useState<CertificateStudent | null>(null);
 
   // Read ?payment= URL param on mount
   useEffect(() => {
@@ -147,6 +186,9 @@ export default function AdminDashboard() {
         if (org) {
           setStats({ total: org.total_seats, used: org.used_seats });
           setOrgName(org.name ?? "");
+          setSubscriptionStatus(org.subscription_status ?? "none");
+          setStripeCustomerId(org.stripe_customer_id ?? null);
+          setOrgCreatedAt(org.created_at ?? null);
           setOrgId(org.id); // triggers Effect 2
         } else {
           setLoading(false);
@@ -198,6 +240,25 @@ export default function AdminDashboard() {
     setBundleSummary((data as BundleSeatSummary[]) ?? []);
   };
 
+  /**
+   * Calls get_student_progress_summary RPC to populate the Student Progress section.
+   * @param id - The organization's UUID.
+   * @returns Promise<void>
+   */
+  const fetchStudentProgress = async (id: string): Promise<void> => {
+    const { data, error } = await (supabase as any).rpc("get_student_progress_summary", {
+      org_id_param: id,
+    });
+
+    if (error) {
+      console.error("AdminDashboard: student progress fetch failed:", error.message);
+      toast.error(`Failed to load student progress: ${error.message}`);
+      return;
+    }
+
+    setStudentProgress((data as StudentProgressRow[]) ?? []);
+  };
+
   // Effect 2: fetch licenses and bundle summary once orgId is set
   useEffect(() => {
     if (!orgId) return;
@@ -206,7 +267,7 @@ export default function AdminDashboard() {
       try {
         const { data: licenses, error: licensesError } = await supabase
           .from("licenses")
-          .select("id, student_email, course_type, is_active, user_id, bundle_id")
+          .select("id, student_email, course_type, is_active, user_id, bundle_id, expires_at, subscription_type")
           .eq("org_id", orgId);
 
         if (licensesError) {
@@ -217,6 +278,7 @@ export default function AdminDashboard() {
         setStudents(rows);
         await fetchBundleNamesForLicenses(rows);
         await fetchBundleSummary(orgId);
+        await fetchStudentProgress(orgId);
       } catch {
         // no-op
       } finally {
@@ -249,11 +311,14 @@ export default function AdminDashboard() {
       if (org) {
         setStats({ total: org.total_seats, used: org.used_seats });
         setOrgName(org.name ?? "");
+        setSubscriptionStatus(org.subscription_status ?? "none");
+        setStripeCustomerId(org.stripe_customer_id ?? null);
+        setOrgCreatedAt(org.created_at ?? null);
       }
 
       const { data: licenses, error: licensesError } = await supabase
         .from("licenses")
-        .select("id, student_email, course_type, is_active, user_id, bundle_id")
+        .select("id, student_email, course_type, is_active, user_id, bundle_id, expires_at")
         .eq("org_id", orgId);
 
       if (licensesError) {
@@ -264,6 +329,7 @@ export default function AdminDashboard() {
       setStudents(rows);
       await fetchBundleNamesForLicenses(rows);
       await fetchBundleSummary(orgId);
+      await fetchStudentProgress(orgId);
     } catch {
       // no-op
     }
@@ -287,6 +353,7 @@ export default function AdminDashboard() {
     setBundles((data as CourseBundle[]) ?? []);
     setSelectedBundleId("");
     setSeatQuantity(1);
+    setSubscriptionType("academic_year");
     setBuyDialogOpen(true);
   };
 
@@ -315,6 +382,7 @@ export default function AdminDashboard() {
             org_id: orgId,
             bundle_id: selectedBundleId,
             quantity: seatQuantity,
+            subscription_type: subscriptionType,
           }),
         }
       );
@@ -406,6 +474,45 @@ export default function AdminDashboard() {
     }
   };
 
+  /**
+   * Opens the Stripe Billing Portal so the admin can manage their subscription,
+   * update payment method, or view invoices.
+   * @returns Promise<void>
+   */
+  const handleManageBilling = async (): Promise<void> => {
+    if (!orgId) return;
+    setOpeningPortal(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-portal-session`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ org_id: orgId }),
+        }
+      );
+
+      const json = await res.json();
+      if (!res.ok || !json.url) {
+        toast.error(json.error ?? "Failed to open billing portal.");
+        return;
+      }
+
+      window.location.href = json.url;
+    } catch {
+      toast.error("An unexpected error occurred. Please try again.");
+    } finally {
+      setOpeningPortal(false);
+    }
+  };
+
   const adminFirstName = profile?.first_name || null;
   const adminDisplayName = profile
     ? `${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim() || user?.email
@@ -424,6 +531,59 @@ export default function AdminDashboard() {
 
   const availableCount = Math.max(0, stats.total - stats.used);
   const usedPct = stats.total > 0 ? Math.round((stats.used / stats.total) * 100) : 0;
+
+  // ── Subscription timeline derived from the latest-expiring license ──────
+  const latestLicense = [...students]
+    .filter((s) => s.expires_at)
+    .sort((a, b) => new Date(b.expires_at!).getTime() - new Date(a.expires_at!).getTime())[0] ?? null;
+
+  const orgExpiresAt = latestLicense?.expires_at ? new Date(latestLicense.expires_at) : null;
+  const orgSubscriptionType = latestLicense?.subscription_type ?? null;
+
+  const subscriptionStartDate: Date | null = (() => {
+    if (!orgExpiresAt || !orgSubscriptionType) return null;
+    const d = new Date(orgExpiresAt);
+    if (orgSubscriptionType === "summer_camp") d.setDate(d.getDate() - 42);
+    else d.setMonth(d.getMonth() - 10);
+    return d;
+  })();
+
+  const now = new Date();
+  const daysRemaining = orgExpiresAt
+    ? Math.max(0, Math.ceil((orgExpiresAt.getTime() - now.getTime()) / 86_400_000))
+    : null;
+
+  const totalDays = orgSubscriptionType === "summer_camp" ? 42 : 304;
+  const daysUsed = subscriptionStartDate
+    ? Math.max(0, Math.floor((now.getTime() - subscriptionStartDate.getTime()) / 86_400_000))
+    : 0;
+  const timeUsedPct = Math.min(100, Math.round((daysUsed / totalDays) * 100));
+
+  const daysColor =
+    daysRemaining === null ? "text-muted-foreground"
+    : daysRemaining <= 7   ? "text-red-600"
+    : daysRemaining <= 30  ? "text-orange-500"
+    : "text-green-600";
+
+  const barColor =
+    daysRemaining === null ? "bg-muted"
+    : daysRemaining <= 7   ? "bg-red-500"
+    : daysRemaining <= 30  ? "bg-orange-500"
+    : "bg-green-500";
+
+  const planLabel = orgSubscriptionType === "summer_camp"
+    ? "Summer Camp / Youth Development"
+    : orgSubscriptionType === "academic_year"
+    ? "School / Workforce Preparation"
+    : null;
+
+  const billingLabel = orgSubscriptionType === "summer_camp"
+    ? "One-time · 6-week access"
+    : orgSubscriptionType === "academic_year"
+    ? "Monthly recurring · 10-month term"
+    : null;
+
+  const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   // Per-bundle chart: each bundle is one segment; value = total purchased seats
   const chartData = bundleSummary
@@ -467,6 +627,25 @@ export default function AdminDashboard() {
             <p className="text-primary-foreground/75 mt-1 text-sm">
               Here's what's happening with your program today.
             </p>
+
+            {/* Subscription status pill */}
+            {subscriptionStatus === "active" && (
+              <span className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-400/20 text-green-100 border border-green-300/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse" />
+                Monthly Subscription Active
+              </span>
+            )}
+            {subscriptionStatus === "past_due" && (
+              <span className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-400/20 text-red-100 border border-red-300/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-300" />
+                Payment Past Due
+              </span>
+            )}
+            {subscriptionStatus === "cancelled" && (
+              <span className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/10 text-white/60 border border-white/20">
+                Subscription Ended
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
@@ -480,6 +659,22 @@ export default function AdminDashboard() {
                 <p className="text-[10px] text-primary-foreground/60 uppercase tracking-wider">Admin</p>
               </div>
             </div>
+
+            {/* Manage Billing — only shown for subscription orgs */}
+            {stripeCustomerId && (
+              <Button
+                className="bg-white/20 hover:bg-white/30 text-primary-foreground border border-white/30 backdrop-blur-sm shadow-none font-semibold"
+                onClick={handleManageBilling}
+                disabled={openingPortal}
+              >
+                {openingPortal ? (
+                  <Loader2 className="animate-spin mr-2 h-4 w-4" />
+                ) : (
+                  <CreditCard className="mr-2 h-4 w-4" />
+                )}
+                Manage Billing
+              </Button>
+            )}
 
             <Button
               className="bg-white/20 hover:bg-white/30 text-primary-foreground border border-white/30 backdrop-blur-sm shadow-none font-semibold"
@@ -498,6 +693,234 @@ export default function AdminDashboard() {
             </Button>
           </div>
         </div>
+      </div>
+
+      {/* ── Past-due warning banner ──────────────────────────────────── */}
+      {subscriptionStatus === "past_due" && (
+        <div className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-5 py-4">
+          <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold text-destructive">Payment Past Due</p>
+            <p className="text-sm text-destructive/80 mt-0.5">
+              Your last monthly payment failed. Student access will be suspended shortly.
+              Please update your payment method to keep subscriptions active.
+            </p>
+          </div>
+          {stripeCustomerId && (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleManageBilling}
+              disabled={openingPortal}
+              className="shrink-0"
+            >
+              {openingPortal ? <Loader2 className="animate-spin h-4 w-4" /> : "Update Payment"}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* ── Admin Profile + Subscription Overview ───────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Admin Profile */}
+        <Card className="border-none shadow-card bg-card">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-5">
+              {/* Avatar */}
+              <div className="shrink-0">
+                {profile?.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt="Avatar"
+                    className="w-16 h-16 rounded-2xl object-cover ring-2 ring-primary/20"
+                  />
+                ) : (
+                  <div
+                    className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-display font-bold text-primary-foreground shadow-soft"
+                    style={{ background: "linear-gradient(135deg, hsl(160 84% 39%), hsl(180 70% 45%))" }}
+                  >
+                    {(profile?.first_name?.[0] ?? user?.email?.[0] ?? "A").toUpperCase()}
+                  </div>
+                )}
+              </div>
+
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <h3 className="text-xl font-display font-bold text-foreground truncate">
+                  {adminDisplayName}
+                </h3>
+                <p className="text-sm text-muted-foreground truncate mt-0.5">{user?.email}</p>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide bg-primary/10 text-primary">
+                    <Shield className="h-3 w-3" /> Administrator
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide bg-muted text-muted-foreground">
+                    <Building2 className="h-3 w-3" /> {orgName || "—"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Details grid */}
+            <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-border pt-4">
+              <div>
+                <p className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Organization</p>
+                <p className="text-sm font-medium text-foreground mt-0.5 truncate">{orgName || "—"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Role</p>
+                <p className="text-sm font-medium text-foreground mt-0.5">Organization Admin</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Total Seats</p>
+                <p className="text-sm font-medium text-foreground mt-0.5">{stats.total} purchased · {stats.used} used</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Member Since</p>
+                <p className="text-sm font-medium text-foreground mt-0.5">
+                  {orgCreatedAt ? fmt(new Date(orgCreatedAt)) : "—"}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Subscription Overview */}
+        <Card className="border-none shadow-card bg-card">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <Award className="h-5 w-5 text-primary" />
+                </div>
+                <CardTitle className="text-lg font-display font-bold">Subscription</CardTitle>
+              </div>
+
+              {/* Status badge */}
+              {subscriptionStatus === "active" && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-green-500/10 text-green-600 tracking-wide">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Active
+                </span>
+              )}
+              {subscriptionStatus === "past_due" && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-red-500/10 text-red-600 tracking-wide">
+                  <AlertTriangle className="h-3 w-3" /> Past Due
+                </span>
+              )}
+              {subscriptionStatus === "cancelled" && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-muted text-muted-foreground tracking-wide">
+                  Ended
+                </span>
+              )}
+              {(subscriptionStatus === "none" || !subscriptionStatus) && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-muted text-muted-foreground tracking-wide">
+                  No subscription
+                </span>
+              )}
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            {planLabel ? (
+              <>
+                {/* Plan + billing type */}
+                <div className="p-3 rounded-xl bg-primary/5 border border-primary/10 space-y-1">
+                  <p className="text-sm font-semibold text-foreground">{planLabel}</p>
+                  <p className="text-xs text-muted-foreground">{billingLabel}</p>
+                </div>
+
+                {/* Dates */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex items-start gap-2">
+                    <Calendar className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Started</p>
+                      <p className="text-sm font-medium text-foreground">
+                        {subscriptionStartDate ? fmt(subscriptionStartDate) : "—"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold">Expires</p>
+                      <p className="text-sm font-medium text-foreground">
+                        {orgExpiresAt ? fmt(orgExpiresAt) : "—"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Time remaining progress */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <Timer className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+                        Time Remaining
+                      </span>
+                    </div>
+                    <span className={`text-sm font-bold ${daysColor}`}>
+                      {daysRemaining !== null
+                        ? daysRemaining === 0 ? "Expired" : `${daysRemaining} day${daysRemaining !== 1 ? "s" : ""} left`
+                        : "—"}
+                    </span>
+                  </div>
+                  <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ${barColor}`}
+                      style={{ width: `${timeUsedPct}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+                    <span>{timeUsedPct}% used</span>
+                    <span>{100 - timeUsedPct}% remaining</span>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-2 pt-1">
+                  {stripeCustomerId && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={handleManageBilling}
+                      disabled={openingPortal}
+                    >
+                      {openingPortal
+                        ? <Loader2 className="animate-spin h-3.5 w-3.5 mr-1.5" />
+                        : <CreditCard className="h-3.5 w-3.5 mr-1.5" />}
+                      Manage Billing
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    className={stripeCustomerId ? "flex-1" : "w-full"}
+                    onClick={handleOpenBuyDialog}
+                  >
+                    <UserPlus className="h-3.5 w-3.5 mr-1.5" /> Buy More Seats
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-6 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center">
+                  <Award className="h-6 w-6 text-muted-foreground/40" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">No active subscription</p>
+                  <p className="text-xs text-muted-foreground mt-1">Purchase seats to get started.</p>
+                </div>
+                <Button size="sm" onClick={handleOpenBuyDialog}>
+                  <CreditCard className="h-3.5 w-3.5 mr-1.5" /> Purchase Seats
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* ── Buy Seats Dialog ─────────────────────────────────────────── */}
@@ -520,6 +943,19 @@ export default function AdminDashboard() {
                       {b.name} — ${b.price_per_seat.toFixed(2)} / seat
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Subscription Type</label>
+              <Select value={subscriptionType} onValueChange={setSubscriptionType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select subscription type…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="summer_camp">Summer Camp / Youth Development — 6 Weeks</SelectItem>
+                  <SelectItem value="academic_year">School / Workforce Preparation — 1 Academic Year (10 months)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -815,6 +1251,183 @@ export default function AdminDashboard() {
         </Card>
       </div>
 
+      {/* ── Student Progress ────────────────────────────────────────── */}
+      {studentProgress.length > 0 && (() => {
+        const now = new Date();
+
+        /** Derive status badge for a progress row */
+        const getStatus = (row: StudentProgressRow): "Completed" | "Expired" | "On Track" | "Behind" => {
+          if (row.expires_at && new Date(row.expires_at) < now) return "Expired";
+          if (row.lessons_completed >= row.total_lessons) return "Completed";
+          if (row.last_activity && (now.getTime() - new Date(row.last_activity).getTime()) <= 7 * 24 * 60 * 60 * 1000) return "On Track";
+          return "Behind";
+        };
+
+        const completedCount = studentProgress.filter(r => getStatus(r) === "Completed").length;
+        const completionRate = studentProgress.length > 0 ? Math.round((completedCount / studentProgress.length) * 100) : 0;
+        const avgScoreAll = studentProgress.length > 0
+          ? Math.round(studentProgress.reduce((sum, r) => sum + Number(r.average_score), 0) / studentProgress.length)
+          : 0;
+
+        const statusStyles: Record<string, string> = {
+          Completed: "bg-green-500/10 text-green-600",
+          "On Track": "bg-primary/10 text-primary",
+          Behind: "bg-orange-500/10 text-orange-600",
+          Expired: "bg-red-500/10 text-red-600",
+        };
+
+        return (
+          <Card className="border-none shadow-card bg-card">
+            <CardHeader className="flex flex-row items-center gap-3 pb-2">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                <BarChart2 className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle className="text-xl font-display font-bold">Student Progress</CardTitle>
+                <p className="text-muted-foreground text-sm mt-0.5">Detailed progress for all active students</p>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-muted/40 text-muted-foreground text-xs uppercase tracking-widest">
+                      <th className="py-3 pl-6 pr-4 font-semibold">Student</th>
+                      <th className="py-3 px-4 font-semibold">Bundle</th>
+                      <th className="py-3 px-4 font-semibold">Progress</th>
+                      <th className="py-3 px-4 font-semibold">Avg Score</th>
+                      <th className="py-3 px-4 font-semibold">Last Active</th>
+                      <th className="py-3 px-4 font-semibold">Expires</th>
+                      <th className="py-3 px-4 font-semibold text-right">Status</th>
+                      <th className="py-3 pl-4 pr-6 font-semibold text-right">Certificate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {studentProgress.map((row, idx) => {
+                      const status = getStatus(row);
+                      const progressPct = row.total_lessons > 0
+                        ? Math.round((row.lessons_completed / row.total_lessons) * 100)
+                        : 0;
+                      const expiresDate = row.expires_at ? new Date(row.expires_at) : null;
+                      const isExpiredRow = expiresDate ? expiresDate < now : false;
+                      const isExpiringSoon = expiresDate && !isExpiredRow
+                        ? (expiresDate.getTime() - now.getTime()) < 7 * 24 * 60 * 60 * 1000
+                        : false;
+
+                      return (
+                        <tr
+                          key={`${row.student_email}-${idx}`}
+                          className={`text-sm transition-colors hover:bg-primary/5 ${idx % 2 === 0 ? "bg-card" : "bg-muted/20"}`}
+                        >
+                          <td className="py-3.5 pl-6 pr-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                                {row.student_email[0].toUpperCase()}
+                              </div>
+                              <span className="font-medium text-foreground truncate max-w-[180px]">
+                                {row.student_email}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            {row.bundle_name ? (
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-primary/10 text-primary tracking-wide">
+                                {row.bundle_name}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground/40">—</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 min-w-[140px]">
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-xs text-muted-foreground">
+                                <span>{row.lessons_completed} / {row.total_lessons} lessons</span>
+                                <span className="font-semibold text-foreground">{progressPct}%</span>
+                              </div>
+                              <Progress value={progressPct} className="h-1.5" />
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span className="font-semibold text-foreground">
+                              {row.average_score > 0 ? `${Math.round(Number(row.average_score))}%` : "—"}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-muted-foreground">
+                            {row.last_activity ? (
+                              <div className="flex items-center gap-1.5">
+                                <Clock className="h-3.5 w-3.5 shrink-0" />
+                                <span>{new Date(row.last_activity).toLocaleDateString()}</span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground/40">No activity</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            {expiresDate ? (
+                              <span className={`text-sm font-medium ${
+                                isExpiredRow ? "text-red-600" : isExpiringSoon ? "text-orange-500" : "text-green-600"
+                              }`}>
+                                {expiresDate.toLocaleDateString()}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground/40">—</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-right">
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide ${statusStyles[status]}`}>
+                              {status}
+                            </span>
+                          </td>
+                          <td className="py-3.5 pl-4 pr-6 text-right">
+                            {status === "Completed" ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2.5 text-xs gap-1.5 text-primary border-primary/30 hover:bg-primary/5"
+                                onClick={() => setCertStudent({
+                                  student_email: row.student_email,
+                                  student_first_name: row.student_first_name,
+                                  student_last_name: row.student_last_name,
+                                  bundle_name: row.bundle_name,
+                                  lessons_completed: row.lessons_completed,
+                                  total_lessons: row.total_lessons,
+                                  average_score: row.average_score,
+                                  last_activity: row.last_activity,
+                                })}
+                              >
+                                <Award className="h-3 w-3" /> Generate
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground/40">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  {/* Summary row */}
+                  <tfoot>
+                    <tr className="border-t border-border bg-muted/30 text-sm font-semibold">
+                      <td className="py-3 pl-6 pr-4 text-foreground">
+                        {studentProgress.length} student{studentProgress.length !== 1 ? "s" : ""} total
+                      </td>
+                      <td className="py-3 px-4" />
+                      <td className="py-3 px-4 text-foreground">
+                        Completion: {completionRate}%
+                      </td>
+                      <td className="py-3 px-4 text-foreground">
+                        Avg: {avgScoreAll > 0 ? `${avgScoreAll}%` : "—"}
+                      </td>
+                      <td colSpan={4} className="py-3 pl-4 pr-6" />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       {/* ── Participant Directory ────────────────────────────────────── */}
       <Card className="border-none shadow-card bg-card">
         <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-3">
@@ -843,6 +1456,7 @@ export default function AdminDashboard() {
                   <th className="py-3 pl-6 pr-4 font-semibold">Student</th>
                   <th className="py-3 px-4 font-semibold">Course</th>
                   <th className="py-3 px-4 font-semibold">Bundle</th>
+                  <th className="py-3 px-4 font-semibold">Expires</th>
                   <th className="py-3 px-4 font-semibold text-right">Status</th>
                   <th className="py-3 pl-4 pr-6 font-semibold text-right">Actions</th>
                 </tr>
@@ -851,6 +1465,15 @@ export default function AdminDashboard() {
                 {filteredStudents.map((s, idx) => {
                   const initial = s.student_email[0].toUpperCase();
                   const isEven = idx % 2 === 0;
+
+                  // Expiry color logic
+                  const now = new Date();
+                  const expiresDate = s.expires_at ? new Date(s.expires_at) : null;
+                  const isLicenseExpired = expiresDate ? expiresDate < now : false;
+                  const isExpiringSoon = expiresDate && !isLicenseExpired
+                    ? (expiresDate.getTime() - now.getTime()) < 7 * 24 * 60 * 60 * 1000
+                    : false;
+
                   return (
                     <tr
                       key={s.id}
@@ -873,6 +1496,21 @@ export default function AdminDashboard() {
                         {s.bundle_id && bundleNames[s.bundle_id] ? (
                           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold uppercase bg-primary/10 text-primary tracking-wide">
                             {bundleNames[s.bundle_id]}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground/40">—</span>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        {expiresDate ? (
+                          <span className={`text-sm font-medium ${
+                            isLicenseExpired
+                              ? "text-red-600"
+                              : isExpiringSoon
+                              ? "text-orange-500"
+                              : "text-green-600"
+                          }`}>
+                            {expiresDate.toLocaleDateString()}
                           </span>
                         ) : (
                           <span className="text-xs text-muted-foreground/40">—</span>
@@ -940,7 +1578,7 @@ export default function AdminDashboard() {
                 })}
                 {filteredStudents.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="py-16 text-center">
+                    <td colSpan={6} className="py-16 text-center">
                       <div className="flex flex-col items-center gap-2">
                         <Users className="h-8 w-8 text-muted-foreground/30" />
                         <p className="text-muted-foreground text-sm">
@@ -956,6 +1594,15 @@ export default function AdminDashboard() {
         </CardContent>
       </Card>
 
+      {certStudent && (
+        <CertificateModal
+          open={!!certStudent}
+          onClose={() => setCertStudent(null)}
+          student={certStudent}
+          orgName={orgName}
+          adminName={adminDisplayName as string}
+        />
+      )}
     </div>
   );
 }
