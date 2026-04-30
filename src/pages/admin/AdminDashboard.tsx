@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { CertificateModal, type CertificateStudent } from "@/components/admin/CertificateModal";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -54,6 +56,8 @@ import {
   Award,
   CalendarDays,
   Timer,
+  Pencil,
+  KeyRound,
 } from "lucide-react";
 
 interface CourseBundle {
@@ -104,7 +108,8 @@ const BUNDLE_COLORS = [
 ];
 
 export default function AdminDashboard() {
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, refreshProfile } = useAuth();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ total: 0, used: 0 });
   const [orgId, setOrgId] = useState<string | null>(null);
@@ -149,6 +154,13 @@ export default function AdminDashboard() {
   // Certificate modal
   const [certStudent, setCertStudent] = useState<CertificateStudent | null>(null);
 
+  // Edit profile dialog
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [editFirstName, setEditFirstName] = useState("");
+  const [editLastName, setEditLastName] = useState("");
+  const [editOrgName, setEditOrgName] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+
   // Read ?payment= URL param on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -186,7 +198,11 @@ export default function AdminDashboard() {
         if (org) {
           setStats({ total: org.total_seats, used: org.used_seats });
           setOrgName(org.name ?? "");
-          setSubscriptionStatus(org.subscription_status ?? "none");
+          // Fall back to "active" if the org has seats but the column is not yet set
+          const derivedStatus = org.subscription_status && org.subscription_status !== "none"
+            ? org.subscription_status
+            : (org.total_seats > 0 ? "active" : "none");
+          setSubscriptionStatus(derivedStatus);
           setStripeCustomerId(org.stripe_customer_id ?? null);
           setOrgCreatedAt(org.created_at ?? null);
           setOrgId(org.id); // triggers Effect 2
@@ -311,14 +327,17 @@ export default function AdminDashboard() {
       if (org) {
         setStats({ total: org.total_seats, used: org.used_seats });
         setOrgName(org.name ?? "");
-        setSubscriptionStatus(org.subscription_status ?? "none");
+        const derivedStatus = org.subscription_status && org.subscription_status !== "none"
+          ? org.subscription_status
+          : (org.total_seats > 0 ? "active" : "none");
+        setSubscriptionStatus(derivedStatus);
         setStripeCustomerId(org.stripe_customer_id ?? null);
         setOrgCreatedAt(org.created_at ?? null);
       }
 
       const { data: licenses, error: licensesError } = await supabase
         .from("licenses")
-        .select("id, student_email, course_type, is_active, user_id, bundle_id, expires_at")
+        .select("id, student_email, course_type, is_active, user_id, bundle_id, expires_at, subscription_type")
         .eq("org_id", orgId);
 
       if (licensesError) {
@@ -510,6 +529,57 @@ export default function AdminDashboard() {
       toast.error("An unexpected error occurred. Please try again.");
     } finally {
       setOpeningPortal(false);
+    }
+  };
+
+  /**
+   * Opens the edit profile dialog pre-populated with current values.
+   */
+  const handleOpenEditProfile = (): void => {
+    setEditFirstName(profile?.first_name ?? "");
+    setEditLastName(profile?.last_name ?? "");
+    setEditOrgName(orgName);
+    setEditProfileOpen(true);
+  };
+
+  /**
+   * Saves the edited display name and org name to Supabase, then refreshes the profile.
+   * @returns Promise<void>
+   */
+  const handleSaveProfile = async (): Promise<void> => {
+    if (!user) return;
+    setSavingProfile(true);
+    try {
+      const { error: profileErr } = await supabase
+        .from("profiles")
+        .update({ first_name: editFirstName.trim(), last_name: editLastName.trim() })
+        .eq("id", user.id);
+
+      if (profileErr) {
+        toast.error("Failed to update profile.");
+        return;
+      }
+
+      if (orgId && editOrgName.trim()) {
+        const { error: orgErr } = await supabase
+          .from("organizations")
+          .update({ name: editOrgName.trim() })
+          .eq("id", orgId);
+
+        if (orgErr) {
+          toast.error("Failed to update organization name.");
+          return;
+        }
+        setOrgName(editOrgName.trim());
+      }
+
+      await refreshProfile();
+      toast.success("Profile updated.");
+      setEditProfileOpen(false);
+    } catch {
+      toast.error("An unexpected error occurred.");
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -784,6 +854,26 @@ export default function AdminDashboard() {
                 </p>
               </div>
             </div>
+
+            {/* Edit profile actions */}
+            <div className="mt-4 flex gap-2 border-t border-border pt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 gap-1.5"
+                onClick={handleOpenEditProfile}
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit Profile
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 gap-1.5"
+                onClick={() => navigate("/profile")}
+              >
+                <KeyRound className="h-3.5 w-3.5" /> Security Settings
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -905,6 +995,40 @@ export default function AdminDashboard() {
                   </Button>
                 </div>
               </>
+            ) : subscriptionStatus === "active" ? (
+              /* Seats exist but license rows lack subscription_type yet — show generic active state */
+              <div className="space-y-4">
+                <div className="p-3 rounded-xl bg-primary/5 border border-primary/10">
+                  <p className="text-sm font-semibold text-foreground">Seats Active</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Your organization has {stats.total} purchased seat{stats.total !== 1 ? "s" : ""}.
+                    Assign them to students from the Participant Directory below.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  {stripeCustomerId && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={handleManageBilling}
+                      disabled={openingPortal}
+                    >
+                      {openingPortal
+                        ? <Loader2 className="animate-spin h-3.5 w-3.5 mr-1.5" />
+                        : <CreditCard className="h-3.5 w-3.5 mr-1.5" />}
+                      Manage Billing
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    className={stripeCustomerId ? "flex-1" : "w-full"}
+                    onClick={handleOpenBuyDialog}
+                  >
+                    <UserPlus className="h-3.5 w-3.5 mr-1.5" /> Buy More Seats
+                  </Button>
+                </div>
+              </div>
             ) : (
               <div className="flex flex-col items-center gap-3 py-6 text-center">
                 <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center">
@@ -1593,6 +1717,69 @@ export default function AdminDashboard() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Edit Profile Dialog ─────────────────────────────────────── */}
+      <Dialog open={editProfileOpen} onOpenChange={setEditProfileOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Profile</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-first-name">First Name</Label>
+                <Input
+                  id="edit-first-name"
+                  value={editFirstName}
+                  onChange={(e) => setEditFirstName(e.target.value)}
+                  placeholder="First name"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-last-name">Last Name</Label>
+                <Input
+                  id="edit-last-name"
+                  value={editLastName}
+                  onChange={(e) => setEditLastName(e.target.value)}
+                  placeholder="Last name"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-org-name">Organization Name</Label>
+              <Input
+                id="edit-org-name"
+                value={editOrgName}
+                onChange={(e) => setEditOrgName(e.target.value)}
+                placeholder="Organization name"
+              />
+            </div>
+
+            <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+              To change your email or password, use{" "}
+              <button
+                className="text-primary underline underline-offset-2 font-medium"
+                onClick={() => { setEditProfileOpen(false); navigate("/profile"); }}
+              >
+                Security Settings
+              </button>
+              .
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditProfileOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveProfile} disabled={savingProfile}>
+              {savingProfile ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {certStudent && (
         <CertificateModal

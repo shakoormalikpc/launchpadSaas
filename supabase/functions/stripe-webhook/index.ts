@@ -155,8 +155,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.error("stripe-webhook: unexpected error on licenses insert (non-fatal):", err);
     }
 
-    // 5. For subscription mode: store Stripe IDs and set status on org
+    // 5. Update org status and store Stripe IDs
     if (session.mode === "subscription" && session.subscription && session.customer) {
+      // Monthly recurring: store all Stripe IDs + mark active
       const { error: subErr } = await supabase
         .from("organizations")
         .update({
@@ -170,6 +171,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
         console.error(
           "stripe-webhook: failed to store subscription info on org (non-fatal):",
           subErr.message
+        );
+      }
+    } else if (session.mode === "payment") {
+      // One-time payment (Summer Camp): just mark org as active
+      const { error: payErr } = await supabase
+        .from("organizations")
+        .update({ subscription_status: "active" })
+        .eq("id", org_id);
+
+      if (payErr) {
+        console.error(
+          "stripe-webhook: failed to set org active for one-time payment (non-fatal):",
+          payErr.message
         );
       }
     }
