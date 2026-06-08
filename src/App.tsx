@@ -7,10 +7,12 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/auth/Login";
 import SignUp from "./pages/auth/SignUp";
+import DemoSignUp from "./pages/auth/DemoSignUp";
 import CompleteProfile from "./pages/auth/CompleteProfile";
 import Profile from "./pages/Profile";
 import Dashboard from "./pages/Dashboard";
 import AdminDashboard from "./pages/admin/AdminDashboard"; // Naya page import
+import Demo from "./pages/Demo";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 
@@ -34,6 +36,8 @@ const App = () => (
             />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<SignUp />} />
+            <Route path="/demo" element={<Demo />} />
+            <Route path="/demo/signup" element={<DemoSignUp />} />
             <Route
               path="/complete-profile"
               element={

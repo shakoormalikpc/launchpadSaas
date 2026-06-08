@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
+import { DEMO_GROUP_NAME } from "@/pages/auth/DemoSignUp";
+
+const DEMO_LESSON_IDS = [
+  "earning-money",
+  "living-on-your-own",
+  "understanding-wants-needs",
+];
+
 const ALL_LESSON_IDS = [
   "earning-money",
   "living-on-your-own",
@@ -49,15 +57,18 @@ interface UseStudentBundleResult {
  * Fetches the student's active license and resolves which lessons they are
  * allowed to access based on their bundle.
  *
+ * Demo accounts (group_name === DEMO_GROUP_NAME) get the first 3 lessons.
  * Org admins and users with no license get access to all 14 lessons.
  *
  * @param studentEmail - The authenticated user's email address.
  * @param role - The user's profile role (e.g. "student" or "org_admin").
+ * @param groupName - The user's group_name from their profile.
  * @returns Allowed lesson IDs, the bundle name, and a loading flag.
  */
 export function useStudentBundle(
   studentEmail: string | null | undefined,
-  role: string | null | undefined
+  role: string | null | undefined,
+  groupName: string | null | undefined
 ): UseStudentBundleResult {
   const [allowedLessonIds, setAllowedLessonIds] = useState<string[]>(ALL_LESSON_IDS);
   const [bundleName, setBundleName] = useState<string | null>(null);
@@ -65,6 +76,15 @@ export function useStudentBundle(
   const [isExpired, setIsExpired] = useState(false);
 
   useEffect(() => {
+    // Demo accounts get first 3 lessons only.
+    if (groupName === DEMO_GROUP_NAME) {
+      setAllowedLessonIds(DEMO_LESSON_IDS);
+      setBundleName("Demo");
+      setIsExpired(false);
+      setLoading(false);
+      return;
+    }
+
     // Org admins always see all lessons; no fetch needed.
     if (role === "org_admin") {
       setAllowedLessonIds(ALL_LESSON_IDS);
@@ -138,7 +158,7 @@ export function useStudentBundle(
     return () => {
       cancelled = true;
     };
-  }, [studentEmail, role]);
+  }, [studentEmail, role, groupName]);
 
   return { allowedLessonIds, bundleName, loading, isExpired };
 }

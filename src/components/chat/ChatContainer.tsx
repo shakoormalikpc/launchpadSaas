@@ -17,7 +17,7 @@ import { getLessonData, isGenericLesson } from "@/data/lessonDataLoader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
-import { Rocket, ArrowLeft, Building2, AlertTriangle } from "lucide-react";
+import { Rocket, ArrowLeft, Building2, AlertTriangle, Sparkles } from "lucide-react";
 import { lessons } from "@/data/lessons";
 import launchpadLogo from "@/assets/launchpad-logo.png";
 
@@ -28,7 +28,8 @@ type ViewState = "menu" | string; // "menu" or lessonId
 export const ChatContainer = () => {
   const { profile, user } = useAuth();
   const { orgName } = useOrgName(user?.email);
-  const { allowedLessonIds, isExpired } = useStudentBundle(user?.email, profile?.role);
+  const { allowedLessonIds, isExpired } = useStudentBundle(user?.email, profile?.role, profile?.group_name);
+  const isDemoUser = profile?.group_name === "__demo__";
   const [viewState, setViewState] = useState<ViewState>("menu");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
   const lastRecordedCompletionId = useRef<string | null>(null);
@@ -258,6 +259,19 @@ export const ChatContainer = () => {
                 <Building2 className="h-4 w-4 text-primary shrink-0" />
                 <span className="text-sm font-semibold text-primary">{orgName}</span>
                 <Badge variant="secondary" className="text-xs">Member</Badge>
+              </div>
+            )}
+
+            {/* Demo mode banner */}
+            {isDemoUser && !isExpired && (
+              <div className="w-full max-w-lg mb-4 flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+                <Sparkles className="h-5 w-5 text-primary shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-primary">Demo Mode</p>
+                  <p className="text-xs text-muted-foreground">
+                    3 of 14 lessons available. Contact us to unlock the full program.
+                  </p>
+                </div>
               </div>
             )}
 
