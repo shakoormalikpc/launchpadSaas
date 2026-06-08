@@ -65,15 +65,32 @@ export default function DemoSignUp() {
       if (signUpError) throw new Error(signUpError.message);
       if (!data.user) throw new Error("Account creation failed. Please try again.");
 
-      // 2. Create student profile tagged as demo
-      const { error: profileError } = await supabase.from("profiles").insert({
+      // Wait for the Supabase auth lock to settle before making a DB call.
+      // signUp() triggers onAuthStateChange which holds the auth storage lock;
+      // the immediate profile insert competes for the same lock without this delay.
+      await new Promise<void>((r) => setTimeout(r, 500));
+
+      // 2. Create student profile tagged as demo (upsert for idempotency)
+      const profilePayload = {
         id: data.user.id,
         first_name: form.firstName.trim(),
         last_name: form.lastName.trim(),
         role: "student",
         group_name: DEMO_GROUP_NAME,
         created_at: new Date().toISOString(),
-      });
+      };
+
+      let { error: profileError } = await supabase
+        .from("profiles")
+        .upsert(profilePayload, { onConflict: "id" });
+
+      if (profileError) {
+        // One retry after an additional delay in case the lock was still contested.
+        await new Promise<void>((r) => setTimeout(r, 600));
+        ({ error: profileError } = await supabase
+          .from("profiles")
+          .upsert(profilePayload, { onConflict: "id" }));
+      }
 
       if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`);
 

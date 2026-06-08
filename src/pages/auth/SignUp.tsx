@@ -68,17 +68,29 @@ export default function SignUp() {
             if (signUpError) throw new Error(`Auth Error: ${signUpError.message}`);
             if (!data.user) throw new Error("Authentication failed - no user returned.");
 
-            // 2. Create profile row
-            const { error: profileError } = await supabase
+            // Wait for the Supabase auth lock to settle before making a DB call.
+            await new Promise<void>((r) => setTimeout(r, 500));
+
+            // 2. Create profile row (upsert for idempotency)
+            const adminProfilePayload = {
+                id: data.user.id,
+                first_name: adminForm.firstName.trim(),
+                last_name: adminForm.lastName.trim(),
+                group_name: adminForm.groupName.trim(),
+                role: 'org_admin',
+                created_at: new Date().toISOString(),
+            };
+
+            let { error: profileError } = await supabase
                 .from('profiles')
-                .insert({
-                    id: data.user.id,
-                    first_name: adminForm.firstName.trim(),
-                    last_name: adminForm.lastName.trim(),
-                    group_name: adminForm.groupName.trim(),
-                    role: 'org_admin',
-                    created_at: new Date().toISOString(),
-                });
+                .upsert(adminProfilePayload, { onConflict: 'id' });
+
+            if (profileError) {
+                await new Promise<void>((r) => setTimeout(r, 600));
+                ({ error: profileError } = await supabase
+                    .from('profiles')
+                    .upsert(adminProfilePayload, { onConflict: 'id' }));
+            }
 
             if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`);
 
@@ -132,6 +144,9 @@ export default function SignUp() {
             if (signUpError) throw new Error(`Auth Error: ${signUpError.message}`);
             if (!data.user) throw new Error("Authentication failed - no user returned.");
 
+            // Wait for the Supabase auth lock to settle before making DB calls.
+            await new Promise<void>((r) => setTimeout(r, 500));
+
             // 2. Verify an active invitation exists for this email
             const { data: license, error: licenseError } = await supabase
                 .from('licenses')
@@ -151,15 +166,24 @@ export default function SignUp() {
             }
 
             // 3. Create student profile (name filled in at /complete-profile)
-            const { error: profileError } = await supabase
+            const studentProfilePayload = {
+                id: data.user.id,
+                first_name: '',
+                last_name: '',
+                role: 'student',
+                created_at: new Date().toISOString(),
+            };
+
+            let { error: profileError } = await supabase
                 .from('profiles')
-                .insert({
-                    id: data.user.id,
-                    first_name: '',
-                    last_name: '',
-                    role: 'student',
-                    created_at: new Date().toISOString(),
-                });
+                .upsert(studentProfilePayload, { onConflict: 'id' });
+
+            if (profileError) {
+                await new Promise<void>((r) => setTimeout(r, 600));
+                ({ error: profileError } = await supabase
+                    .from('profiles')
+                    .upsert(studentProfilePayload, { onConflict: 'id' }));
+            }
 
             if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`);
 
