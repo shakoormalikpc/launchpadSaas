@@ -8,8 +8,8 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import launchpadLogo from "@/assets/launchpad-logo.png";
 
-/** Sentinel value stored in group_name to identify demo accounts. */
-export const DEMO_GROUP_NAME = "__demo__";
+/** Sentinel value stored in profiles.group_name to identify demo accounts. */
+const DEMO_GROUP_NAME = "__demo__";
 
 /**
  * Demo signup page. Creates a student account with access to 3 lessons only.
@@ -65,10 +65,12 @@ export default function DemoSignUp() {
       if (signUpError) throw new Error(signUpError.message);
       if (!data.user) throw new Error("Account creation failed. Please try again.");
 
-      // Wait for the Supabase auth lock to settle before making a DB call.
-      // signUp() triggers onAuthStateChange which holds the auth storage lock;
-      // the immediate profile insert competes for the same lock without this delay.
-      await new Promise<void>((r) => setTimeout(r, 500));
+      // getUser() is a server-side API call — it does not touch the local auth
+      // storage lock that signUp() holds while it writes the session. Awaiting it
+      // here ensures the local session is fully committed before we make any DB
+      // call that needs the JWT (i.e., the profiles upsert below).
+      const { error: getUserError } = await supabase.auth.getUser();
+      if (getUserError) throw new Error("Authentication failed after signup. Please try signing in.");
 
       // 2. Create student profile tagged as demo (upsert for idempotency)
       const profilePayload = {
@@ -80,17 +82,9 @@ export default function DemoSignUp() {
         created_at: new Date().toISOString(),
       };
 
-      let { error: profileError } = await supabase
+      const { error: profileError } = await supabase
         .from("profiles")
         .upsert(profilePayload, { onConflict: "id" });
-
-      if (profileError) {
-        // One retry after an additional delay in case the lock was still contested.
-        await new Promise<void>((r) => setTimeout(r, 600));
-        ({ error: profileError } = await supabase
-          .from("profiles")
-          .upsert(profilePayload, { onConflict: "id" }));
-      }
 
       if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`);
 

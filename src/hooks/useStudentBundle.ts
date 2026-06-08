@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-import { DEMO_GROUP_NAME } from "@/pages/auth/DemoSignUp";
+// Sentinel stored in profiles.group_name to identify demo accounts.
+// Must match the value written in DemoSignUp.tsx.
+const DEMO_GROUP_NAME = "__demo__";
 
 const DEMO_LESSON_IDS = [
   "earning-money",

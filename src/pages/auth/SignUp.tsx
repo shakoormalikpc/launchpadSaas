@@ -68,8 +68,10 @@ export default function SignUp() {
             if (signUpError) throw new Error(`Auth Error: ${signUpError.message}`);
             if (!data.user) throw new Error("Authentication failed - no user returned.");
 
-            // Wait for the Supabase auth lock to settle before making a DB call.
-            await new Promise<void>((r) => setTimeout(r, 500));
+            // getUser() confirms the session server-side and waits for the local
+            // auth storage lock (held by signUp) to be released before we make
+            // any DB call that needs the JWT.
+            await supabase.auth.getUser();
 
             // 2. Create profile row (upsert for idempotency)
             const adminProfilePayload = {
@@ -144,8 +146,9 @@ export default function SignUp() {
             if (signUpError) throw new Error(`Auth Error: ${signUpError.message}`);
             if (!data.user) throw new Error("Authentication failed - no user returned.");
 
-            // Wait for the Supabase auth lock to settle before making DB calls.
-            await new Promise<void>((r) => setTimeout(r, 500));
+            // getUser() confirms the session server-side and waits for the local
+            // auth storage lock (held by signUp) to be released before any DB call.
+            await supabase.auth.getUser();
 
             // 2. Verify an active invitation exists for this email
             const { data: license, error: licenseError } = await supabase
