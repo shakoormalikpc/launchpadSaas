@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -60,7 +61,7 @@ export default function Login() {
                         </div>
                         <div className="space-y-2">
                             <Label>Password</Label>
-                            <Input name="password" type="password" required value={formData.password} onChange={handleChange} />
+                            <PasswordInput name="password" required value={formData.password} onChange={handleChange} />
                         </div>
                         <Button type="submit" className="w-full" disabled={loading}>
                             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

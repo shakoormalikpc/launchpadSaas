@@ -33,6 +33,7 @@ interface Lesson2State {
   phase: Lesson2Phase;
   pretestIndex: number;
   pretestResponses: string[];
+  pretestCorrect: number;
   topicIndex: number;
   posttestIndex: number;
   posttestScore: number;
@@ -42,6 +43,7 @@ const initialState: Lesson2State = {
   phase: "intro",
   pretestIndex: 0,
   pretestResponses: [],
+  pretestCorrect: 0,
   topicIndex: 0,
   posttestIndex: 0,
   posttestScore: 0,
@@ -67,7 +69,7 @@ export const useLesson2Chatbot = (lessonId?: string) => {
   Introduction: ${lesson2Introduction}
   
   Pre-Test:
-  ${lesson2PreTest.map(q => `Q: ${q.question}\nA: ${q.mentorAnswer}`).join('\n')}
+  ${lesson2PreTest.map(q => `Q: ${q.question}\nA: ${q.correctAnswer}\nExplanation: ${q.explanation}`).join('\n')}
   
   Post-Test:
   ${lesson2PostTest.map(q => `Q: ${q.question}\nA: ${q.correctAnswer}\nExplanation: ${q.explanation}`).join('\n')}
@@ -165,7 +167,7 @@ export const useLesson2Chatbot = (lessonId?: string) => {
 
   const addMessage = useCallback((role: "user" | "mentor", content: string) => {
     const newMessage: Message = {
-      id: Date.now().toString(),
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
       role,
       content,
     };
@@ -211,8 +213,12 @@ export const useLesson2Chatbot = (lessonId?: string) => {
       return false;
     }
 
-    // Check if user is asking a question
-    if (questionAnswering.isLikelyQuestion(content)) {
+    const state = stateRef.current;
+    const isQuizPhase = state.phase === "pretest" || state.phase === "posttest";
+
+    // Check if user is asking a question (but NOT during a quiz, where free-text
+    // answers can be misread as questions and stall the lesson)
+    if (!isQuizPhase && questionAnswering.isLikelyQuestion(content)) {
       questionAnswering.setQAMode(true);
       const { answer } = await questionAnswering.processQuestion(content);
       if (answer) {
@@ -220,8 +226,6 @@ export const useLesson2Chatbot = (lessonId?: string) => {
       }
       return false;
     }
-
-    const state = stateRef.current;
 
     // Check for menu command at any point
     if (content.toLowerCase().includes("menu")) {
@@ -239,32 +243,62 @@ export const useLesson2Chatbot = (lessonId?: string) => {
         await simulateTyping(preTestIntro, ["I'm ready!"]);
         break;
 
-      case "pretest-intro":
-        updateState({ phase: "pretest" });
+      case "pretest-intro": {
+        updateState({ phase: "pretest", pretestCorrect: 0 });
+        const firstQ = lesson2PreTest[0];
         await simulateTyping(
-          `Question 1 of ${lesson2PreTest.length}:\n\n${lesson2PreTest[0].question}`
+          `Question 1 of ${lesson2PreTest.length}:\n\n${firstQ.question}\n\n${firstQ.options.join("\n")}`,
+          firstQ.options.map(opt => opt.split(". ")[0])
         );
         break;
+      }
 
       case "pretest": {
-        const { pretestIndex, pretestResponses } = state;
+        const { pretestIndex } = state;
         const currentQuestion = lesson2PreTest[pretestIndex];
-        const newResponses = [...pretestResponses, content];
 
-        await simulateTyping(currentQuestion.mentorAnswer);
+        const userAnswer = content.trim().toUpperCase().charAt(0);
+        const isCorrect = userAnswer === currentQuestion.correctAnswer;
+
+        // Track the pre-test score (for display only — the post-test is final).
+        const correctSoFar = state.pretestCorrect + (isCorrect ? 1 : 0);
+
+        // Pre-test is ungraded, so keep feedback encouraging either way.
+        const feedback = isCorrect
+          ? `Nice! ${currentQuestion.explanation}`
+          : `Good guess — and no worries, this is just to see where you're starting! The best answer is ${currentQuestion.correctAnswer}. ${currentQuestion.explanation}`;
+
+        await simulateTyping(feedback);
 
         if (pretestIndex < lesson2PreTest.length - 1) {
           const nextIndex = pretestIndex + 1;
-          updateState({ pretestIndex: nextIndex, pretestResponses: newResponses });
+          updateState({ pretestIndex: nextIndex, pretestCorrect: correctSoFar });
 
           await new Promise(resolve => setTimeout(resolve, 500));
+          const nextQ = lesson2PreTest[nextIndex];
           await simulateTyping(
-            `Question ${nextIndex + 1} of ${lesson2PreTest.length}:\n\n${lesson2PreTest[nextIndex].question}`
+            `Question ${nextIndex + 1} of ${lesson2PreTest.length}:\n\n${nextQ.question}\n\n${nextQ.options.join("\n")}`,
+            nextQ.options.map(opt => opt.split(". ")[0])
           );
         } else {
-          updateState({ phase: "pretest-complete", pretestResponses: newResponses });
+          updateState({ phase: "pretest-complete", pretestCorrect: correctSoFar });
+
+          const total = lesson2PreTest.length;
+          const percentage = Math.round((correctSoFar / total) * 100);
+
+          let encouragement: string;
+          if (percentage >= 80) {
+            encouragement = `🌟 **Great start!** You got ${correctSoFar} out of ${total} correct (${percentage}%)!\n\nYou already know quite a bit — let's build on that and make you an expert.`;
+          } else if (percentage >= 60) {
+            encouragement = `👍 **Good effort!** You got ${correctSoFar} out of ${total} correct (${percentage}%).\n\nYou've got a solid base to build on. By the end of this lesson, these ideas will click even more.`;
+          } else if (percentage >= 40) {
+            encouragement = `💪 **Nice try!** You got ${correctSoFar} out of ${total} correct (${percentage}%).\n\nThat's exactly why we're here — to learn together! This is just a starting point, not a grade.`;
+          } else {
+            encouragement = `🤝 **No worries at all!** You got ${correctSoFar} out of ${total} correct (${percentage}%).\n\nThis is a pre-test, not a grade! Everyone starts somewhere — by the end of this lesson you'll be amazed at how much you've grown.`;
+          }
+
           await new Promise(resolve => setTimeout(resolve, 500));
-          await simulateTyping(preTestComplete, ["Let's learn!", "I'm ready"]);
+          await simulateTyping(`${encouragement}\n\n${preTestComplete}`, ["Let's learn!", "I'm ready"]);
         }
         break;
       }
@@ -413,7 +447,7 @@ export const useLesson2Chatbot = (lessonId?: string) => {
     }
 
     return false;
-  }, [addMessage, simulateTyping]);
+  }, [addMessage, simulateTyping, questionAnswering]);
 
   const resetLesson = useCallback(async () => {
     setMessages([]);

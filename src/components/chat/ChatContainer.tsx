@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
 import { Rocket, ArrowLeft, Building2, AlertTriangle, Sparkles } from "lucide-react";
 import { lessons } from "@/data/lessons";
+import { DemoCertificate } from "@/components/demo/DemoCertificate";
 import launchpadLogo from "@/assets/launchpad-logo.png";
 
 const INTRO_VIDEO_SEEN_KEY = "intro_video_seen";
@@ -86,7 +87,7 @@ export const ChatContainer = () => {
       postTest: [],
       lessonCompletion: "",
     },
-    activeLessonId || undefined
+    activeLessonId && isGenericLesson(activeLessonId) ? activeLessonId : undefined
   );
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -275,6 +276,17 @@ export const ChatContainer = () => {
               </div>
             )}
 
+            {/* Demo certificate — unlocks once all demo lessons are complete */}
+            {isDemoUser && !isExpired && (
+              <DemoCertificate
+                email={user?.email}
+                firstName={profile?.first_name}
+                lastName={profile?.last_name}
+                lessonsCompleted={progress.lessonsCompleted}
+                variant="banner"
+              />
+            )}
+
             {/* Subscription expired banner */}
             {isExpired && (
               <div className="w-full max-w-lg mb-6 flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3">
@@ -332,6 +344,24 @@ export const ChatContainer = () => {
     <div className="flex flex-col h-screen max-h-screen bg-background">
       <ChatHeader />
 
+      {/* Always-visible lesson bar with back button (stays put while messages scroll) */}
+      {lessonData.hasStarted && (
+        <div className="shrink-0 bg-background/95 backdrop-blur border-b border-border px-4 py-2 flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleBackToMenu}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="w-4 h-4 mr-1" />
+            Back to Lessons
+          </Button>
+          <span className="text-sm font-medium text-foreground truncate">
+            Lesson {lessonNumber}: {lessonTitle}
+          </span>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-4 pt-6 space-y-4">
         {!lessonData.hasStarted ? (
           <div className="flex flex-col items-center justify-center min-h-[60vh] animate-fade-in py-8">
@@ -387,16 +417,6 @@ export const ChatContainer = () => {
           </div>
         ) : (
           <>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleBackToMenu}
-              className="text-muted-foreground hover:text-foreground mb-2"
-            >
-              <ArrowLeft className="w-4 h-4 mr-1" />
-              Back to Lessons
-            </Button>
-
             {lessonData.messages.map((message) => (
               <ChatMessage
                 key={message.id}

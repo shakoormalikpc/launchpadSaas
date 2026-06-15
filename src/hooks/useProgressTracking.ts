@@ -22,50 +22,56 @@ export const useProgressTracking = () => {
   const [progress, setProgress] = useState<ProgressData>({ lessonsCompleted: [], totalLessonsCompleted: 0 });
   const [loading, setLoading] = useState(true);
 
-  // Fetch progress from Supabase
-  useEffect(() => {
+  /**
+   * Fetches the user's completed-lesson progress from Supabase and replaces
+   * local state with the DB truth. Safe to call any time to re-sync after a
+   * mutation (e.g. a reset) so the UI never drifts from the database.
+   * @returns A promise that resolves once progress has been refreshed.
+   */
+  const refetchProgress = useCallback(async (): Promise<void> => {
     if (!user) {
       setLoading(false);
       return;
     }
 
-    const fetchProgress = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('user_progress')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('status', 'completed');
+    try {
+      const { data, error } = await supabase
+        .from('user_progress')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('status', 'completed');
 
-        if (error) throw error;
+      if (error) throw error;
 
-        const lessonsCompleted: LessonProgress[] = data.map((row: any) => ({
-          lessonId: row.lesson_id,
-          completed: row.status === 'completed',
-          postTestScore: row.score_post || 0,
-          postTestTotal: row.score_post_total || 10, // Get actual quiz length from database
-          completedAt: row.updated_at
-        }));
+      const lessonsCompleted: LessonProgress[] = data.map((row: any) => ({
+        lessonId: row.lesson_id,
+        completed: row.status === 'completed',
+        postTestScore: row.score_post || 0,
+        postTestTotal: row.score_post_total || 10, // Get actual quiz length from database
+        completedAt: row.updated_at
+      }));
 
-        setProgress({
-          lessonsCompleted,
-          totalLessonsCompleted: lessonsCompleted.length
-        });
-      } catch (error: any) {
-        if (error.name === 'AbortError') {
-          console.log("Fetch progress aborted");
-          return;
-        }
-        console.error("Error fetching progress:", error);
-        // We log the error but don't show a toast to avoid interrupting the user experience
-        // specifically when they just signed in and progress might not be ready.
-      } finally {
-        setLoading(false);
+      setProgress({
+        lessonsCompleted,
+        totalLessonsCompleted: lessonsCompleted.length
+      });
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log("Fetch progress aborted");
+        return;
       }
-    };
-
-    fetchProgress();
+      console.error("Error fetching progress:", error);
+      // We log the error but don't show a toast to avoid interrupting the user experience
+      // specifically when they just signed in and progress might not be ready.
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
+
+  // Initial load
+  useEffect(() => {
+    refetchProgress();
+  }, [refetchProgress]);
 
   const recordLessonCompletion = useCallback(async (
     lessonId: string,
@@ -202,40 +208,57 @@ export const useProgressTracking = () => {
   const resetLessonProgress = useCallback(async (lessonId: string) => {
     if (!user) return;
 
+    // Optimistically remove from local state so the card updates immediately.
+    setProgress(prev => {
+      const newLessonsCompleted = prev.lessonsCompleted.filter(l => l.lessonId !== lessonId);
+      return {
+        lessonsCompleted: newLessonsCompleted,
+        totalLessonsCompleted: newLessonsCompleted.length,
+      };
+    });
+
     try {
-      // 1. Delete from Supabase
-      const { error } = await supabase
+      // 1. Delete the progress row. .select() returns the deleted rows so we can
+      // confirm one was actually removed — a successful call that deletes 0 rows
+      // means the row survived (e.g. blocked by an RLS policy).
+      const { data: deleted, error } = await supabase
         .from('user_progress')
         .delete()
         .eq('user_id', user.id)
-        .eq('lesson_id', lessonId);
+        .eq('lesson_id', lessonId)
+        .select('id');
 
       if (error) throw error;
 
-      // 2. Update local state
-      setProgress(prev => {
-        const newLessonsCompleted = prev.lessonsCompleted.filter(l => l.lessonId !== lessonId);
-        return {
-          lessonsCompleted: newLessonsCompleted,
-          totalLessonsCompleted: newLessonsCompleted.length,
-        };
-      });
+      if (!deleted || deleted.length === 0) {
+        console.warn(
+          `resetLessonProgress: deleted 0 rows for lesson "${lessonId}". The row is still in the DB — check the DELETE RLS policy on user_progress.`
+        );
+        // Re-sync so we don't show a falsely-reset card that reappears later.
+        await refetchProgress();
+        toast.error("Couldn't reset this lesson — it wasn't cleared from the database. Please try again.");
+        return;
+      }
 
-      // 3. Clear any lesson specific state if it exists (optional but good practice)
+      // 2. Clear any saved chat state so the lesson restarts cleanly.
       const { error: stateError } = await supabase
         .from('lesson_states')
         .delete()
         .eq('user_id', user.id)
         .eq('lesson_id', lessonId);
 
-      if (stateError) console.log("Note: No active session state to clear or error clearing it");
+      if (stateError) {
+        console.warn("resetLessonProgress: failed to clear lesson_states:", stateError);
+      }
 
       toast.success("Lesson reset! You can now retake the quiz.");
     } catch (error: any) {
       console.error("Error resetting lesson:", error);
+      // Re-sync local state with the DB truth so the UI reflects reality.
+      await refetchProgress();
       toast.error(error.message || "Failed to reset lesson");
     }
-  }, [user]);
+  }, [user, refetchProgress]);
 
   return {
     progress,
@@ -245,6 +268,7 @@ export const useProgressTracking = () => {
     getOverallGrade,
     getEncouragementMessage,
     resetLessonProgress,
+    refetchProgress,
   };
 };
 

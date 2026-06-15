@@ -3,7 +3,9 @@
 export interface PreTestQuestion {
   id: string;
   question: string;
-  mentorAnswer: string;
+  options: string[];
+  correctAnswer: string;
+  explanation: string;
 }
 
 export interface PostTestQuestion {
@@ -37,48 +39,104 @@ export const preTestIntro = `Before we dive into the lesson, let's take a short 
 
 This will help us see what you already know about living on your own. Don't worry - this isn't about getting everything right. It's about understanding where we're starting from so we can grow together!
 
-I'll ask you 8 questions. Just answer in your own words - there's no wrong answer here!`;
+I'll ask you 8 quick multiple-choice questions. Just pick the answer you think is best (A, B, C, or D) - there's no pressure here!`;
 
 export const lesson2PreTest: PreTestQuestion[] = [
   {
     id: "pre1",
-    question: "What does 'living on your own' really mean to you?",
-    mentorAnswer: "Great thinking! Living on your own means managing personal, financial, and household responsibilities independently. It's not about doing whatever you want - it's about balancing freedom with responsibility."
+    question: "What does 'living on your own' really mean?",
+    options: [
+      "A. Having total freedom with no responsibilities",
+      "B. Managing your personal, financial, and household responsibilities independently",
+      "C. Letting someone else handle all your bills and chores",
+      "D. Never having to follow any rules"
+    ],
+    correctAnswer: "B",
+    explanation: "Living on your own means managing personal, financial, and household responsibilities independently. It's not about doing whatever you want - it's about balancing freedom with responsibility."
   },
   {
     id: "pre2",
-    question: "Can you name something that would be a fixed expense when living on your own? (An expense that stays the same each month)",
-    mentorAnswer: "Good answer! Fixed expenses are costs that stay the same each month, like rent, car payments, or insurance. These are predictable, which makes budgeting easier!"
+    question: "Which of these is an example of a fixed expense?",
+    options: [
+      "A. Groceries",
+      "B. Gas for your car",
+      "C. Rent",
+      "D. Entertainment"
+    ],
+    correctAnswer: "C",
+    explanation: "Fixed expenses stay the same each month - like rent, car payments, or insurance. Because they're predictable, they make budgeting easier!"
   },
   {
     id: "pre3",
-    question: "What do you think a security deposit is for when renting a home or apartment?",
-    mentorAnswer: "Exactly right! A security deposit covers possible damage or unpaid rent. This protects landlords if tenants leave the property damaged or without paying. You usually get it back when you move out if everything is in good condition!"
+    question: "What is a security deposit mainly used for when renting?",
+    options: [
+      "A. To pay for your first month of internet",
+      "B. To cover possible damage or unpaid rent",
+      "C. To tip the landlord",
+      "D. To buy furniture for the apartment"
+    ],
+    correctAnswer: "B",
+    explanation: "A security deposit covers possible damage or unpaid rent. You usually get it back when you move out if everything is in good condition!"
   },
   {
     id: "pre4",
-    question: "What's one responsibility you think a tenant (renter) has?",
-    mentorAnswer: "Good thinking! Tenants are responsible for paying rent on time, taking care of the property, following lease rules, and reporting any maintenance issues to the landlord."
+    question: "Which of the following is a responsibility of a tenant (renter)?",
+    options: [
+      "A. Paying rent on time and taking care of the property",
+      "B. Setting the rent price",
+      "C. Selling the building",
+      "D. Choosing the neighbors"
+    ],
+    correctAnswer: "A",
+    explanation: "Tenants are responsible for paying rent on time, taking care of the property, following lease rules, and reporting any maintenance issues to the landlord."
   },
   {
     id: "pre5",
-    question: "What's one thing you think a landlord is required to do for their tenants?",
-    mentorAnswer: "That's right! Landlords must provide a safe and livable space. They need to ensure the home meets safety and health standards, handle repairs, and respect your privacy."
+    question: "What is a landlord required to do for their tenants?",
+    options: [
+      "A. Provide free furniture",
+      "B. Pay the tenant's personal bills",
+      "C. Provide a safe, livable space and handle repairs",
+      "D. Visit the home anytime without notice"
+    ],
+    correctAnswer: "C",
+    explanation: "Landlords must provide a safe and livable space, handle repairs, meet health and safety standards, and respect your privacy."
   },
   {
     id: "pre6",
-    question: "Why do you think creating a budget before living on your own is important?",
-    mentorAnswer: "Spot on! A budget helps track expenses and prevents overspending. It keeps your spending under control and helps you plan for the unexpected. It's like a roadmap for your money!"
+    question: "Why is creating a budget before living on your own important?",
+    options: [
+      "A. It guarantees you'll become rich",
+      "B. It helps you track spending and avoid overspending",
+      "C. It removes the need to pay any bills",
+      "D. It lets you ignore your expenses"
+    ],
+    correctAnswer: "B",
+    explanation: "A budget helps you track expenses and prevents overspending. It's like a roadmap for your money that helps you plan for the unexpected."
   },
   {
     id: "pre7",
     question: "What should you do before signing a lease agreement?",
-    mentorAnswer: "Smart thinking! You should read and understand every clause or term in the lease. Never sign anything you don't fully understand - always ask questions first!"
+    options: [
+      "A. Sign it quickly before someone else does",
+      "B. Skip the fine print to save time",
+      "C. Rely only on a friend's summary",
+      "D. Read and understand every clause, and ask questions"
+    ],
+    correctAnswer: "D",
+    explanation: "Always read and understand every term in the lease. Never sign anything you don't fully understand - ask questions first!"
   },
   {
     id: "pre8",
-    question: "What might happen if you spend more than your monthly income?",
-    mentorAnswer: "You've got it! Overspending leads to accumulating debt. When you spend more than you earn, you end up borrowing money or using credit, which can cause serious financial stress later on."
+    question: "What can happen if you regularly spend more than your monthly income?",
+    options: [
+      "A. You build up savings automatically",
+      "B. You accumulate debt and financial stress",
+      "C. Your rent gets cheaper",
+      "D. Nothing changes at all"
+    ],
+    correctAnswer: "B",
+    explanation: "Spending more than you earn leads to debt. You end up borrowing money or using credit, which can cause serious financial stress later on."
   }
 ];
 

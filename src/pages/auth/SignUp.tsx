@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -28,6 +29,8 @@ export default function SignUp() {
 
     // Student fields
     const [studentForm, setStudentForm] = useState({
+        firstName: "",
+        lastName: "",
         password: "",
         confirmPassword: "",
     });
@@ -129,6 +132,11 @@ export default function SignUp() {
     const handleStudentSignUp = async (e: React.FormEvent) => {
         e.preventDefault();
 
+        if (!studentForm.firstName.trim() || !studentForm.lastName.trim()) {
+            toast.error("First name and last name are required");
+            return;
+        }
+
         if (studentForm.password !== studentForm.confirmPassword) {
             toast.error("Passwords do not match");
             return;
@@ -168,11 +176,12 @@ export default function SignUp() {
                 return;
             }
 
-            // 3. Create student profile (name filled in at /complete-profile)
+            // 3. Create student profile with the name captured here (no separate
+            // /complete-profile step needed).
             const studentProfilePayload = {
                 id: data.user.id,
-                first_name: '',
-                last_name: '',
+                first_name: studentForm.firstName.trim(),
+                last_name: studentForm.lastName.trim(),
                 role: 'student',
                 created_at: new Date().toISOString(),
             };
@@ -205,12 +214,12 @@ export default function SignUp() {
             if (!updatedLicense || updatedLicense.length === 0) {
                 console.error('SignUp: License update blocked — 0 rows affected (likely RLS). License id:', license.id, 'User id:', data.user.id);
                 toast.error("Account created but license activation failed. Please contact your admin.");
-                navigate("/complete-profile");
+                navigate("/");
                 return;
             }
 
-            toast.success("Account created! Please complete your profile.");
-            navigate("/complete-profile");
+            toast.success("Account created! Welcome to LaunchPad.");
+            navigate("/");
         } catch (error: unknown) {
             toast.error((error as { message?: string }).message || "An error occurred during signup");
         } finally {
@@ -259,11 +268,32 @@ export default function SignUp() {
                                         className="bg-muted text-muted-foreground cursor-not-allowed"
                                     />
                                 </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>First Name</Label>
+                                        <Input
+                                            name="firstName"
+                                            required
+                                            value={studentForm.firstName}
+                                            onChange={handleStudentChange}
+                                            placeholder="Jane"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Last Name</Label>
+                                        <Input
+                                            name="lastName"
+                                            required
+                                            value={studentForm.lastName}
+                                            onChange={handleStudentChange}
+                                            placeholder="Smith"
+                                        />
+                                    </div>
+                                </div>
                                 <div className="space-y-2">
                                     <Label>Password</Label>
-                                    <Input
+                                    <PasswordInput
                                         name="password"
-                                        type="password"
                                         required
                                         value={studentForm.password}
                                         onChange={handleStudentChange}
@@ -271,9 +301,8 @@ export default function SignUp() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Confirm Password</Label>
-                                    <Input
+                                    <PasswordInput
                                         name="confirmPassword"
-                                        type="password"
                                         required
                                         value={studentForm.confirmPassword}
                                         onChange={handleStudentChange}
@@ -312,7 +341,7 @@ export default function SignUp() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Password</Label>
-                                    <Input name="password" type="password" required value={adminForm.password} onChange={handleAdminChange} />
+                                    <PasswordInput name="password" required value={adminForm.password} onChange={handleAdminChange} />
                                 </div>
                                 <Button type="submit" className="w-full h-11 font-bold" disabled={loading}>
                                     {loading ? <Loader2 className="mr-2 animate-spin" /> : "Create Account"}

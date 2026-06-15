@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -179,9 +180,8 @@ export default function DemoSignUp() {
             </div>
             <div className="space-y-2">
               <Label>Password</Label>
-              <Input
+              <PasswordInput
                 name="password"
-                type="password"
                 required
                 value={form.password}
                 onChange={handleChange}
@@ -190,9 +190,8 @@ export default function DemoSignUp() {
             </div>
             <div className="space-y-2">
               <Label>Confirm Password</Label>
-              <Input
+              <PasswordInput
                 name="confirmPassword"
-                type="password"
                 required
                 value={form.confirmPassword}
                 onChange={handleChange}

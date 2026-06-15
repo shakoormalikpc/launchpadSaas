@@ -3,9 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 
 // Sentinel stored in profiles.group_name to identify demo accounts.
 // Must match the value written in DemoSignUp.tsx.
-const DEMO_GROUP_NAME = "__demo__";
+export const DEMO_GROUP_NAME = "__demo__";
 
-const DEMO_LESSON_IDS = [
+export const DEMO_LESSON_IDS = [
   "earning-money",
   "living-on-your-own",
   "understanding-wants-needs",

@@ -21,13 +21,16 @@ import { useNavigate } from "react-router-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts";
 import { lessons } from "@/data/lessons";
 import { useAuth } from "@/contexts/AuthContext";
+import { DEMO_GROUP_NAME } from "@/hooks/useStudentBundle";
+import { DemoCertificate } from "@/components/demo/DemoCertificate";
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { profile, user } = useAuth();
   const { progress, getOverallGrade, loading, getEncouragementMessage } = useProgressTracking();
   const { orgName, orgLoading } = useOrgName(user?.id);
-  const { bundleName } = useStudentBundle(user?.email, profile?.role);
+  const { bundleName } = useStudentBundle(user?.email, profile?.role, profile?.group_name);
+  const isDemoUser = profile?.group_name === DEMO_GROUP_NAME;
 
   // Redirect org_admin away from student dashboard
   useEffect(() => {
@@ -150,6 +153,17 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground">Bundle</p>
             </div>
           </div>
+
+          {/* Demo certificate — self-service once all demo lessons are done */}
+          {isDemoUser && (
+            <DemoCertificate
+              email={user?.email}
+              firstName={profile?.first_name}
+              lastName={profile?.last_name}
+              lessonsCompleted={progress.lessonsCompleted}
+              variant="card"
+            />
+          )}
 
           {/* Chart + Achievements */}
           <div className="grid gap-6 md:grid-cols-2 w-full max-w-4xl mb-8">
