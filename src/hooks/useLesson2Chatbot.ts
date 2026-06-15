@@ -110,7 +110,9 @@ export const useLesson2Chatbot = (lessonId?: string) => {
           const savedMessages = data.messages as Message[];
 
           if (savedState && savedMessages && savedMessages.length > 0) {
-            stateRef.current = savedState;
+            // Merge over defaults so states saved before newer fields existed
+            // (e.g. pretestCorrect) don't come back undefined and produce NaN.
+            stateRef.current = { ...initialState, ...savedState };
             setMessages(savedMessages);
             setHasStarted(true);
 
@@ -261,7 +263,8 @@ export const useLesson2Chatbot = (lessonId?: string) => {
         const isCorrect = userAnswer === currentQuestion.correctAnswer;
 
         // Track the pre-test score (for display only — the post-test is final).
-        const correctSoFar = state.pretestCorrect + (isCorrect ? 1 : 0);
+        // `?? 0` guards resumed sessions saved before this field existed.
+        const correctSoFar = (state.pretestCorrect ?? 0) + (isCorrect ? 1 : 0);
 
         // Pre-test is ungraded, so keep feedback encouraging either way.
         const feedback = isCorrect
