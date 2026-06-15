@@ -253,7 +253,9 @@ export const useChatbot = (lessonId?: string) => {
           const savedState = data.state as any;
           const savedMessages = data.messages as Message[];
 
-          if (savedState && savedMessages && savedMessages.length > 0) {
+          // Don't resume a finished lesson — reopening it should restart from
+          // the beginning so "Try Again" works, not reload the completed screen.
+          if (savedState && savedMessages && savedMessages.length > 0 && !savedState.completionData) {
             setCurrentStep(savedState.currentStep);
             setHasStarted(savedState.hasStarted);
             setCompletionData(savedState.completionData);

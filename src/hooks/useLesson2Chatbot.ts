@@ -109,17 +109,14 @@ export const useLesson2Chatbot = (lessonId?: string) => {
           const savedState = data.state as Lesson2State;
           const savedMessages = data.messages as Message[];
 
-          if (savedState && savedMessages && savedMessages.length > 0) {
+          // Don't resume a finished lesson — reopening it should restart from
+          // the beginning so "Try Again" works, not reload the completed screen.
+          if (savedState && savedMessages && savedMessages.length > 0 && savedState.phase !== 'complete') {
             // Merge over defaults so states saved before newer fields existed
             // (e.g. pretestCorrect) don't come back undefined and produce NaN.
             stateRef.current = { ...initialState, ...savedState };
             setMessages(savedMessages);
             setHasStarted(true);
-
-            if (savedState.phase === 'complete') {
-              const score = savedState.posttestScore;
-              setCompletionData({ postTestScore: score, postTestTotal: lesson2PostTest.length });
-            }
 
             toast.success("Resumed from where you left off!");
             forceUpdate({});

@@ -143,17 +143,12 @@ export const useGenericLesson = (lessonData: LessonData, lessonId?: string) => {
           const savedState = data.state as LessonState;
           const savedMessages = data.messages as Message[];
 
-          if (savedState && savedMessages && savedMessages.length > 0) {
+          // Don't resume a finished lesson — reopening it should restart from
+          // the beginning so "Try Again" works, not reload the completed screen.
+          if (savedState && savedMessages && savedMessages.length > 0 && savedState.phase !== 'complete') {
             stateRef.current = savedState;
             setMessages(savedMessages);
             setHasStarted(true);
-
-            // Restore completion data if finished
-            if (savedState.phase === 'complete') {
-              const total = lessonData.postTest.length;
-              const score = savedState.posttestScore;
-              setCompletionData({ postTestScore: score, postTestTotal: total });
-            }
 
             toast.success("Resumed from where you left off!");
           }

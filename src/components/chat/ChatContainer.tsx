@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrgName } from "@/hooks/useOrgName";
-import { useStudentBundle } from "@/hooks/useStudentBundle";
+import { useStudentBundle, DEMO_LESSON_IDS } from "@/hooks/useStudentBundle";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
@@ -16,6 +16,7 @@ import { useProgressTracking, LessonProgress } from "@/hooks/useProgressTracking
 import { getLessonData, isGenericLesson } from "@/data/lessonDataLoader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
 import { Rocket, ArrowLeft, Building2, AlertTriangle, Sparkles } from "lucide-react";
 import { lessons } from "@/data/lessons";
@@ -34,6 +35,8 @@ export const ChatContainer = () => {
   const [viewState, setViewState] = useState<ViewState>("menu");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
   const lastRecordedCompletionId = useRef<string | null>(null);
+  const [showDemoCongrats, setShowDemoCongrats] = useState(false);
+  const demoCelebratedRef = useRef(false);
 
   // Intro video: show once for students only
   const [showIntroVideo, setShowIntroVideo] = useState(false);
@@ -96,6 +99,23 @@ export const ChatContainer = () => {
   const completedLessons = useMemo(() => {
     return progress.lessonsCompleted.map(l => l.lessonId);
   }, [progress]);
+
+  // Demo learners get a "Congratulations" celebration + certificate prompt once
+  // they've finished all demo lessons (the demo's equivalent of finishing all 14).
+  const demoComplete = useMemo(
+    () => isDemoUser && DEMO_LESSON_IDS.every(id => completedLessons.includes(id)),
+    [isDemoUser, completedLessons]
+  );
+
+  useEffect(() => {
+    // Only celebrate when they actually finish a lesson (i.e. they're inside a
+    // lesson view), not when a returning, already-complete user opens the menu
+    // (the menu already shows the certificate banner for that case).
+    if (demoComplete && !demoCelebratedRef.current && viewState !== "menu") {
+      demoCelebratedRef.current = true;
+      setShowDemoCongrats(true);
+    }
+  }, [demoComplete, viewState]);
 
   // Build lesson progress map for display
   const lessonProgressMap = useMemo(() => {
@@ -232,11 +252,39 @@ export const ChatContainer = () => {
   const overallGrade = getOverallGrade();
   const encouragementMessage = getEncouragementMessage();
 
+  // Celebration shown when a demo learner finishes all demo lessons.
+  const demoCongratsDialog = (
+    <Dialog open={showDemoCongrats} onOpenChange={setShowDemoCongrats}>
+      <DialogContent className="max-w-md text-center">
+        <DialogHeader>
+          <DialogTitle className="text-2xl text-center">
+            🎉 Congratulations{profile?.first_name ? `, ${profile.first_name}` : ""}!
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-muted-foreground">
+          You've completed all {DEMO_LESSON_IDS.length} lessons of the LaunchPad demo.
+          Generate your Certificate of Completion below.
+        </p>
+        <DemoCertificate
+          email={user?.email}
+          firstName={profile?.first_name}
+          lastName={profile?.last_name}
+          lessonsCompleted={progress.lessonsCompleted}
+          variant="card"
+        />
+        <Button variant="ghost" onClick={() => setShowDemoCongrats(false)}>
+          Close
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+
   // Render menu/lesson selector
   if (viewState === "menu") {
     return (
       <div className="flex flex-col h-screen max-h-screen bg-background">
         <IntroVideoModal open={showIntroVideo} onClose={handleIntroVideoClose} />
+        {demoCongratsDialog}
         <ChatHeader />
 
         <div className="flex-1 overflow-y-auto p-4 pt-6 flex flex-col items-center justify-start">
@@ -342,6 +390,7 @@ export const ChatContainer = () => {
 
   return (
     <div className="flex flex-col h-screen max-h-screen bg-background">
+      {demoCongratsDialog}
       <ChatHeader />
 
       {/* Always-visible lesson bar with back button (stays put while messages scroll) */}
