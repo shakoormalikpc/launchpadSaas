@@ -9,7 +9,6 @@ import { QuickReplies } from "./QuickReplies";
 import { LessonSelector } from "./LessonSelector";
 import { ProgressDashboard } from "./ProgressDashboard";
 import { IntroVideoModal } from "./IntroVideoModal";
-import { useChatbot } from "@/hooks/useChatbot";
 import { useLesson2Chatbot } from "@/hooks/useLesson2Chatbot";
 import { useGenericLesson } from "@/hooks/useGenericLesson";
 import { useProgressTracking, LessonProgress } from "@/hooks/useProgressTracking";
@@ -66,8 +65,8 @@ export const ChatContainer = () => {
     resetLessonProgress
   } = useProgressTracking();
 
-  // Legacy hooks for Lesson 1 and 2
-  const lesson1 = useChatbot(activeLessonId === "earning-money" ? "earning-money" : undefined);
+  // Lesson 1 now runs on the generic engine (see lessonDataLoader). Lesson 2
+  // still uses its dedicated hook until it's migrated.
   const lesson2 = useLesson2Chatbot(activeLessonId === "living-on-your-own" ? "living-on-your-own" : undefined);
 
   // Get lesson data for generic lessons
@@ -129,11 +128,10 @@ export const ChatContainer = () => {
   // Get current lesson data based on view state
   const getCurrentLesson = useCallback(() => {
     if (viewState === "menu") return null;
-    if (viewState === "earning-money") return lesson1;
     if (viewState === "living-on-your-own") return lesson2;
     if (isGenericLesson(viewState)) return genericLesson;
     return null;
-  }, [viewState, lesson1, lesson2, genericLesson]);
+  }, [viewState, lesson2, genericLesson]);
 
   const currentLesson = getCurrentLesson();
 
@@ -166,17 +164,6 @@ export const ChatContainer = () => {
       );
     }
   }, [genericLesson.completionData, activeLessonId, recordLessonCompletion]);
-
-  // Track completion for Lesson 1
-  useEffect(() => {
-    if (lesson1.completionData && viewState === "earning-money") {
-      recordLessonCompletion(
-        "earning-money",
-        lesson1.completionData.postTestScore,
-        lesson1.completionData.postTestTotal
-      );
-    }
-  }, [lesson1.completionData, viewState, recordLessonCompletion]);
 
   // Track completion for Lesson 2
   useEffect(() => {
@@ -214,19 +201,15 @@ export const ChatContainer = () => {
     setActiveLessonId(null);
 
     // Reset the current lesson
-    if (currentLessonId === "earning-money") {
-      lesson1.resetLesson();
-    } else if (currentLessonId === "living-on-your-own") {
+    if (currentLessonId === "living-on-your-own") {
       lesson2.resetLesson();
     } else if (isGenericLesson(currentLessonId)) {
       genericLesson.resetLesson();
     }
-  }, [viewState, lesson1, lesson2, genericLesson]);
+  }, [viewState, lesson2, genericLesson]);
 
   const handleSendMessage = useCallback(async (content: string) => {
-    if (viewState === "earning-money") {
-      await lesson1.sendMessage(content);
-    } else if (viewState === "living-on-your-own") {
+    if (viewState === "living-on-your-own") {
       const shouldGoToMenu = await lesson2.sendMessage(content);
       if (shouldGoToMenu) {
         lesson2.resetLesson();
@@ -241,7 +224,7 @@ export const ChatContainer = () => {
         setActiveLessonId(null);
       }
     }
-  }, [viewState, lesson1, lesson2, genericLesson]);
+  }, [viewState, lesson2, genericLesson]);
 
   // Get lesson metadata for display
   const getLessonMeta = useCallback((lessonId: string) => {

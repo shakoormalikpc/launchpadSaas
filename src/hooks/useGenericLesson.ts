@@ -145,7 +145,9 @@ export const useGenericLesson = (lessonData: LessonData, lessonId?: string) => {
 
           // Don't resume a finished lesson — reopening it should restart from
           // the beginning so "Try Again" works, not reload the completed screen.
-          if (savedState && savedMessages && savedMessages.length > 0 && savedState.phase !== 'complete') {
+          // Require a valid `phase` so legacy saves from the old Lesson 1 engine
+          // (which stored no `phase`) don't restore into a broken state.
+          if (savedState && savedState.phase && savedMessages && savedMessages.length > 0 && savedState.phase !== 'complete') {
             stateRef.current = savedState;
             setMessages(savedMessages);
             setHasStarted(true);

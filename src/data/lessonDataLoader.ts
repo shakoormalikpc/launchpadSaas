@@ -4,6 +4,7 @@
 import type { LessonData } from "@/hooks/useGenericLesson";
 
 // Import all lesson data modules
+import * as lesson1Data from "./lesson1-earning-money";
 import * as lesson3Data from "./lesson3-wants-needs";
 import * as lesson4Data from "./lesson4-saving-investing";
 import * as lesson5Data from "./lesson5-advertising";
@@ -40,6 +41,7 @@ const createLessonData = (data: {
 
 // Lesson data registry - IDs must match lessons.ts
 export const lessonDataMap: Record<string, LessonData> = {
+  "earning-money": createLessonData(lesson1Data),
   "understanding-wants-needs": createLessonData(lesson3Data),
   "saving-investing": createLessonData(lesson4Data),
   "influence-of-advertising": createLessonData(lesson5Data),
@@ -60,6 +62,7 @@ export const getLessonData = (lessonId: string): LessonData | null => {
 
 // List of lessons that use the generic hook (not Lesson 1 or 2)
 export const genericLessonIds = [
+  "earning-money",
   "understanding-wants-needs",
   "saving-investing",
   "influence-of-advertising",

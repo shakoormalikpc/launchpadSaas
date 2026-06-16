@@ -36,9 +36,8 @@ Vite 5 + React 18 + TypeScript 5 | React Router v6 | Supabase (Auth, DB, Storage
 **Storage:** `avatars` bucket (must be public — not automated)
 
 ## Key Hooks (`src/hooks/`)
-- `useChatbot` — Lesson 1 engine (fixed flow, saves to `lesson_states`)
 - `useLesson2Chatbot` — Lesson 2 engine (duplicate of generic, refactor pending)
-- `useGenericLesson` — Lessons 3–14 engine: `intro → pretest → topics → posttest → complete`
+- `useGenericLesson` — Lessons 1 and 3–14 engine: `intro → pretest → topics → posttest → complete` (80% passing)
 - `useQuestionAnswering` — AI Q&A: local search first → Gemini fallback
 - `useProgressTracking` — CRUD for `user_progress`, grade calculation
 - `useStudentBundle` — Resolves the active bundle for the current student via `licenses` join
@@ -53,7 +52,7 @@ Data files in `src/data/`. Loader: `getLessonData(id)` in `lessonDataLoader.ts`.
 - **Student invite:** ~~no email sent~~ — DONE: `send-invite` Edge Function generates signup link + sends email
 - **License activation:** ~~not wired~~ — DONE: webhook inserts license rows; student activates on signup
 - **Admin search:** ~~not wired~~ — DONE: `searchQuery` state filters `filteredStudents` in `AdminDashboard`
-- **Lesson 1 scoring:** hardcoded `1/1` — no real quiz
+- **Lesson 1 scoring:** ~~hardcoded `1/1` — no real quiz~~ — DONE: migrated to `useGenericLesson` with real pre-test/post-test (`lesson1-earning-money.ts`), 80% passing
 - **Gemini model:** uses `gemini-3-flash-preview` with 404 fallback to `gemini-2.0-flash-exp` — needs fix
 - **`useLesson2Chatbot`:** should be migrated to `useGenericLesson`
 
