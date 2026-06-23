@@ -15,6 +15,7 @@ import AdminDashboard from "./pages/admin/AdminDashboard"; // Naya page import
 import Demo from "./pages/Demo";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import { WelcomeDialog } from "./components/student/WelcomeDialog";
 
 const queryClient = new QueryClient();
 
@@ -25,6 +26,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <WelcomeDialog />
           <Routes>
             <Route
               path="/"

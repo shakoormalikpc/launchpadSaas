@@ -48,6 +48,17 @@ const BUNDLE_LESSONS: Record<string, string[]> = {
   "Advanced Financial Education": ALL_LESSON_IDS,
 };
 
+/**
+ * Returns how many lessons a bundle grants, by its name. Unknown bundles fall
+ * back to the full catalog (matching useStudentBundle's own fallback).
+ * @param bundleName - The course bundle name (e.g. "Advanced Financial Education").
+ * @returns The number of lessons unlocked by that bundle.
+ */
+export function getBundleLessonCount(bundleName: string | null | undefined): number {
+  if (!bundleName) return ALL_LESSON_IDS.length;
+  return (BUNDLE_LESSONS[bundleName] ?? ALL_LESSON_IDS).length;
+}
+
 interface UseStudentBundleResult {
   allowedLessonIds: string[];
   bundleName: string | null;

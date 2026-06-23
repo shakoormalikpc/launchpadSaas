@@ -155,6 +155,11 @@ export default function AdminDashboard() {
   // Selected bundle for the Assign New Seat form
   const [assignBundleId, setAssignBundleId] = useState<string>("");
 
+  // Per-bundle magic invite link: tracks which bundle's link is being minted /
+  // was just copied (for button spinner + "Copied" feedback).
+  const [invitingLinkBundleId, setInvitingLinkBundleId] = useState<string | null>(null);
+  const [copiedBundleId, setCopiedBundleId] = useState<string | null>(null);
+
   // Student progress summary (Feature 2)
   const [studentProgress, setStudentProgress] = useState<StudentProgressRow[]>([]);
 
@@ -446,6 +451,44 @@ export default function AdminDashboard() {
       toast.error("An unexpected error occurred. Please try again.");
     } finally {
       setCheckingOut(false);
+    }
+  };
+
+  /**
+   * Mints (or fetches) the per-bundle magic invite code and copies the full
+   * /signup?code=... link to the clipboard for the admin to share. Every bundle
+   * gets its own unique link; students joining via it receive that exact bundle.
+   * @param bundleId - The bundle to generate the shareable invite link for.
+   * @returns Promise<void>
+   */
+  const handleCopyInviteLink = async (bundleId: string): Promise<void> => {
+    if (!orgId) {
+      toast.error("Organization not loaded. Please refresh and try again.");
+      return;
+    }
+
+    setInvitingLinkBundleId(bundleId);
+    try {
+      const { data: code, error } = await (supabase as any).rpc(
+        "get_or_create_bundle_invite_code",
+        { org_id_param: orgId, bundle_id_param: bundleId }
+      );
+
+      if (error || !code) {
+        toast.error(error?.message ?? "Failed to generate invite link.");
+        return;
+      }
+
+      const link = `${window.location.origin}/signup?code=${encodeURIComponent(code as string)}`;
+      await navigator.clipboard.writeText(link);
+
+      setCopiedBundleId(bundleId);
+      setTimeout(() => setCopiedBundleId((cur) => (cur === bundleId ? null : cur)), 2000);
+      toast.success(`Invite link copied! (${code})`);
+    } catch {
+      toast.error("Could not copy the invite link. Please try again.");
+    } finally {
+      setInvitingLinkBundleId(null);
     }
   };
 
@@ -1352,112 +1395,79 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        {/* Assign New Seat form */}
+        {/* Invite Students — per-bundle magic links */}
         <Card className="lg:col-span-3 border-none shadow-card bg-card">
           <CardHeader className="pb-2">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                <Mail className="h-5 w-5 text-primary" />
+                <Link className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <CardTitle className="text-lg font-display font-bold">Assign New Seat</CardTitle>
-                <p className="text-muted-foreground text-sm">Student will receive an invite link via email</p>
+                <CardTitle className="text-lg font-display font-bold">Invite Students</CardTitle>
+                <p className="text-muted-foreground text-sm">
+                  Share each bundle&apos;s link — students self-enroll into that tier
+                </p>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="pt-4">
-            {noSeatsAvailable ? (
+          <CardContent className="pt-4 space-y-3">
+            {bundleSummary.filter((b) => b.purchased > 0).length === 0 ? (
               <div className="flex flex-col items-center gap-4 py-6 text-center">
-                <div className="w-12 h-12 rounded-xl bg-destructive/10 flex items-center justify-center">
-                  <UserPlus className="h-6 w-6 text-destructive" />
+                <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center">
+                  <UserPlus className="h-6 w-6 text-muted-foreground" />
                 </div>
                 <div>
-                  <p className="font-semibold text-foreground">No seats available</p>
+                  <p className="font-semibold text-foreground">No bundles yet</p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    All purchased seats are assigned. Buy more seats to invite new students.
+                    Purchase seats to generate shareable invite links.
                   </p>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleOpenBuyDialog}
-                >
-                  <CreditCard className="mr-2 h-4 w-4" /> Purchase More Seats
+                <Button type="button" variant="outline" onClick={handleOpenBuyDialog}>
+                  <CreditCard className="mr-2 h-4 w-4" /> Purchase Seats
                 </Button>
               </div>
             ) : (
-              <form onSubmit={handleInvite} className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    Course Bundle
-                  </label>
-                  <Select value={assignBundleId} onValueChange={setAssignBundleId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a bundle…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {assignableBundles.map((b) => (
-                        <SelectItem key={b.bundle_id} value={b.bundle_id}>
-                          {b.bundle_name} — {b.available} seat{b.available !== 1 ? "s" : ""} available
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {assignableBundles.length === 0 && bundleSummary.length === 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      No bundles found. Purchase seats first.
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    Student Email Address
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                    <Input
-                      type="email"
-                      placeholder="student@example.com"
-                      value={newStudentEmail}
-                      onChange={(e) => setNewStudentEmail(e.target.value)}
-                      required
-                      className="pl-9"
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    An invitation link will be generated and sent to this address.
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-xl bg-muted/60">
-                  <div className="text-sm">
-                    {selectedAssignSummary ? (
-                      <>
-                        <span className="text-muted-foreground">Available for this bundle: </span>
-                        <span className="font-bold text-foreground">{selectedAssignSummary.available}</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-muted-foreground">Total available seats: </span>
-                        <span className="font-bold text-foreground">{availableCount}</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <Button
-                  type="submit"
-                  className="w-full bg-primary hover:opacity-90 shadow-soft font-semibold"
-                  disabled={inviting || !assignBundleId}
-                >
-                  {inviting ? (
-                    <><Loader2 className="animate-spin mr-2 h-4 w-4" /> Sending Invite…</>
-                  ) : (
-                    <><UserPlus className="mr-2 h-4 w-4" /> Assign License &amp; Send Invite</>
-                  )}
-                </Button>
-              </form>
+              <>
+                {bundleSummary
+                  .filter((b) => b.purchased > 0)
+                  .map((b) => {
+                    const isFull = b.available <= 0;
+                    return (
+                      <div
+                        key={b.bundle_id}
+                        className="flex items-center justify-between gap-3 p-3 rounded-xl bg-muted/60"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-semibold text-foreground truncate">{b.bundle_name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {b.available} of {b.purchased} seat{b.purchased !== 1 ? "s" : ""} available
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="shrink-0"
+                          onClick={() => handleCopyInviteLink(b.bundle_id)}
+                          disabled={invitingLinkBundleId === b.bundle_id || isFull}
+                          title={isFull ? "No seats left for this bundle" : "Copy this bundle's invite link"}
+                        >
+                          {invitingLinkBundleId === b.bundle_id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : copiedBundleId === b.bundle_id ? (
+                            <Check className="mr-2 h-4 w-4 text-primary" />
+                          ) : (
+                            <Copy className="mr-2 h-4 w-4" />
+                          )}
+                          {isFull ? "Seats full" : copiedBundleId === b.bundle_id ? "Copied!" : "Copy Invite Link"}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                <p className="text-xs text-muted-foreground pt-1">
+                  Anyone with a bundle&apos;s link can self-enroll until that bundle&apos;s seats run out.
+                </p>
+              </>
             )}
           </CardContent>
         </Card>

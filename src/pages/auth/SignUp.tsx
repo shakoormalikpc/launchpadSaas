@@ -14,7 +14,10 @@ export default function SignUp() {
     const [searchParams] = useSearchParams();
 
     const inviteEmail = searchParams.get("email") ?? "";
-    const isStudentSignup = inviteEmail !== "";
+    const inviteCode = (searchParams.get("code") ?? "").trim();
+    // Per-bundle magic-link signup takes precedence over the legacy email invite.
+    const isCodeSignup = inviteCode !== "";
+    const isStudentSignup = !isCodeSignup && inviteEmail !== "";
 
     const [loading, setLoading] = useState(false);
 
@@ -27,10 +30,19 @@ export default function SignUp() {
         password: "",
     });
 
-    // Student fields
+    // Student fields (legacy email-invite flow)
     const [studentForm, setStudentForm] = useState({
         firstName: "",
         lastName: "",
+        password: "",
+        confirmPassword: "",
+    });
+
+    // Magic-link (per-bundle invite code) flow — email is collected here.
+    const [codeForm, setCodeForm] = useState({
+        firstName: "",
+        lastName: "",
+        email: "",
         password: "",
         confirmPassword: "",
     });
@@ -41,6 +53,135 @@ export default function SignUp() {
 
     const handleStudentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setStudentForm({ ...studentForm, [e.target.name]: e.target.value });
+    };
+
+    const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setCodeForm({ ...codeForm, [e.target.name]: e.target.value });
+    };
+
+    /**
+     * Handles student signup via a per-bundle magic invite code: creates the auth
+     * user, then asks the join-via-code Edge Function to atomically claim a seat
+     * for the code's bundle. A full bundle (HTTP 409) blocks registration.
+     * @param e - Form submit event.
+     * @returns Promise<void>
+     */
+    const handleCodeSignUp = async (e: React.FormEvent): Promise<void> => {
+        e.preventDefault();
+
+        if (!codeForm.firstName.trim() || !codeForm.lastName.trim()) {
+            toast.error("First name and last name are required");
+            return;
+        }
+        if (!codeForm.email.trim()) {
+            toast.error("Email is required");
+            return;
+        }
+        if (codeForm.password !== codeForm.confirmPassword) {
+            toast.error("Passwords do not match");
+            return;
+        }
+
+        setLoading(true);
+
+        try {
+            // 1. Create the auth user.
+            const { data, error: signUpError } = await supabase.auth.signUp({
+                email: codeForm.email.trim(),
+                password: codeForm.password,
+            });
+
+            if (signUpError) throw new Error(`Auth Error: ${signUpError.message}`);
+            if (!data.user) throw new Error("Authentication failed - no user returned.");
+
+            // getUser() confirms the session and waits for the local auth storage
+            // lock (held by signUp) to release before any authenticated call.
+            await supabase.auth.getUser();
+
+            // 2. Create the student profile FIRST. licenses.user_id has a foreign
+            //    key to profiles(id), so the profile row must exist before the
+            //    seat claim inserts a license referencing this user.
+            const studentProfilePayload = {
+                id: data.user.id,
+                first_name: codeForm.firstName.trim(),
+                last_name: codeForm.lastName.trim(),
+                role: 'student',
+                created_at: new Date().toISOString(),
+            };
+
+            let { error: profileError } = await supabase
+                .from('profiles')
+                .upsert(studentProfilePayload, { onConflict: 'id' });
+
+            if (profileError) {
+                await new Promise<void>((r) => setTimeout(r, 600));
+                ({ error: profileError } = await supabase
+                    .from('profiles')
+                    .upsert(studentProfilePayload, { onConflict: 'id' }));
+            }
+
+            if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`);
+
+            // 3. Claim a seat for this code's bundle (atomic, server-side).
+            const { data: sessionData } = await supabase.auth.getSession();
+            const accessToken = sessionData.session?.access_token;
+
+            const joinRes = await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/join-via-code`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${accessToken}`,
+                        apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+                    },
+                    body: JSON.stringify({ invite_code: inviteCode }),
+                }
+            );
+
+            const joinJson = await joinRes.json().catch(() => ({}));
+
+            if (!joinRes.ok) {
+                // Seat not granted — block registration. Sign back out so the
+                // half-provisioned account can't reach the app with no license.
+                await supabase.auth.signOut();
+
+                if (joinRes.status === 409) {
+                    toast.error(
+                        "Registration failed. All available seats for this organization's bundle are completely filled."
+                    );
+                } else if (joinRes.status === 404) {
+                    toast.error(
+                        joinJson.error ?? "This invite link is invalid. Please check it with your organization."
+                    );
+                } else {
+                    toast.error(joinJson.error ?? "Registration failed. Please try again or contact your admin.");
+                }
+                return;
+            }
+
+            // Stash the org welcome payload so the global WelcomeDialog can greet
+            // the student once they land (survives the client-side navigation).
+            try {
+                sessionStorage.setItem(
+                    "launchpad_welcome",
+                    JSON.stringify({
+                        orgName: joinJson.org_name ?? null,
+                        bundleName: joinJson.bundle_name ?? null,
+                    })
+                );
+                window.dispatchEvent(new Event("launchpad:welcome"));
+            } catch {
+                // Non-fatal — signup still succeeds without the popup.
+            }
+
+            toast.success("Account created! Welcome to LaunchPad.");
+            navigate("/");
+        } catch (error: unknown) {
+            toast.error((error as { message?: string }).message || "An error occurred during signup");
+        } finally {
+            setLoading(false);
+        }
     };
 
     /**
@@ -234,7 +375,7 @@ export default function SignUp() {
                     <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900" />
                     <div className="relative z-10 flex flex-col items-center text-white">
                         <img src={launchpadLogo} alt="Logo" className="h-24 w-auto mb-8" />
-                        {isStudentSignup ? (
+                        {(isStudentSignup || isCodeSignup) ? (
                             <>
                                 <h2 className="text-4xl font-bold mb-4">You're Invited!</h2>
                                 <p className="text-slate-400 max-w-md text-lg">Create your student account to access your financial literacy courses.</p>
@@ -251,7 +392,71 @@ export default function SignUp() {
 
             <div className="flex items-center justify-center py-12 px-6 bg-background">
                 <div className="mx-auto grid w-full max-w-[400px] gap-8">
-                    {isStudentSignup ? (
+                    {isCodeSignup ? (
+                        <>
+                            <div className="text-center lg:text-left">
+                                <h1 className="text-3xl font-bold">Create Student Account</h1>
+                                <p className="text-sm text-muted-foreground">Join your organization using your invite link</p>
+                            </div>
+
+                            <form onSubmit={handleCodeSignUp} className="space-y-5">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>First Name</Label>
+                                        <Input
+                                            name="firstName"
+                                            required
+                                            value={codeForm.firstName}
+                                            onChange={handleCodeChange}
+                                            placeholder="Jane"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Last Name</Label>
+                                        <Input
+                                            name="lastName"
+                                            required
+                                            value={codeForm.lastName}
+                                            onChange={handleCodeChange}
+                                            placeholder="Smith"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Email</Label>
+                                    <Input
+                                        name="email"
+                                        type="email"
+                                        required
+                                        value={codeForm.email}
+                                        onChange={handleCodeChange}
+                                        placeholder="you@example.com"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Password</Label>
+                                    <PasswordInput
+                                        name="password"
+                                        required
+                                        value={codeForm.password}
+                                        onChange={handleCodeChange}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Confirm Password</Label>
+                                    <PasswordInput
+                                        name="confirmPassword"
+                                        required
+                                        value={codeForm.confirmPassword}
+                                        onChange={handleCodeChange}
+                                    />
+                                </div>
+                                <Button type="submit" className="w-full h-11 font-bold" disabled={loading}>
+                                    {loading ? <Loader2 className="mr-2 animate-spin" /> : "Create Account"}
+                                </Button>
+                            </form>
+                        </>
+                    ) : isStudentSignup ? (
                         <>
                             <div className="text-center lg:text-left">
                                 <h1 className="text-3xl font-bold">Create Student Account</h1>
