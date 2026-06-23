@@ -53,6 +53,8 @@ interface UseStudentBundleResult {
   bundleName: string | null;
   loading: boolean;
   isExpired: boolean;
+  /** True when a student has no active license (e.g. their access was revoked by an admin). */
+  noAccess: boolean;
 }
 
 /**
@@ -76,6 +78,7 @@ export function useStudentBundle(
   const [bundleName, setBundleName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isExpired, setIsExpired] = useState(false);
+  const [noAccess, setNoAccess] = useState(false);
 
   useEffect(() => {
     // Demo accounts get first 3 lessons only.
@@ -83,6 +86,7 @@ export function useStudentBundle(
       setAllowedLessonIds(DEMO_LESSON_IDS);
       setBundleName("Demo");
       setIsExpired(false);
+      setNoAccess(false);
       setLoading(false);
       return;
     }
@@ -91,6 +95,7 @@ export function useStudentBundle(
     if (role === "org_admin") {
       setAllowedLessonIds(ALL_LESSON_IDS);
       setIsExpired(false);
+      setNoAccess(false);
       setLoading(false);
       return;
     }
@@ -98,6 +103,7 @@ export function useStudentBundle(
     if (!studentEmail) {
       setAllowedLessonIds(ALL_LESSON_IDS);
       setIsExpired(false);
+      setNoAccess(false);
       setLoading(false);
       return;
     }
@@ -118,9 +124,20 @@ export function useStudentBundle(
       if (cancelled) return;
 
       if (licErr || !license?.bundle_id) {
-        // No license found – grant all lessons so the user isn't blocked.
+        // A student with no active license has had their access removed (or it
+        // was never granted). Block them and surface a professional message
+        // rather than silently granting all lessons.
+        if (role === "student") {
+          setAllowedLessonIds([]);
+          setIsExpired(false);
+          setNoAccess(true);
+          setLoading(false);
+          return;
+        }
+        // Non-student fallback: grant all lessons so they aren't blocked.
         setAllowedLessonIds(ALL_LESSON_IDS);
         setIsExpired(false);
+        setNoAccess(false);
         setLoading(false);
         return;
       }
@@ -129,6 +146,7 @@ export function useStudentBundle(
       if (license.expires_at && new Date(license.expires_at) < new Date()) {
         setAllowedLessonIds([]);
         setIsExpired(true);
+        setNoAccess(false);
         setLoading(false);
         return;
       }
@@ -144,6 +162,7 @@ export function useStudentBundle(
       if (bundleErr || !bundle?.name) {
         setAllowedLessonIds(ALL_LESSON_IDS);
         setIsExpired(false);
+        setNoAccess(false);
         setLoading(false);
         return;
       }
@@ -152,6 +171,7 @@ export function useStudentBundle(
       setBundleName(name);
       setAllowedLessonIds(BUNDLE_LESSONS[name] ?? ALL_LESSON_IDS);
       setIsExpired(false);
+      setNoAccess(false);
       setLoading(false);
     };
 
@@ -162,5 +182,5 @@ export function useStudentBundle(
     };
   }, [studentEmail, role, groupName]);
 
-  return { allowedLessonIds, bundleName, loading, isExpired };
+  return { allowedLessonIds, bundleName, loading, isExpired, noAccess };
 }

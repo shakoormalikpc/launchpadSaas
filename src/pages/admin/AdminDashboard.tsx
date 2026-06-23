@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { PURCHASING_ENABLED, PURCHASING_DISABLED_MESSAGE } from "@/config/featureFlags";
 import {
   Popover,
   PopoverContent,
@@ -58,7 +59,18 @@ import {
   Timer,
   Pencil,
   KeyRound,
+  UserMinus,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface CourseBundle {
   id: string;
@@ -122,6 +134,9 @@ export default function AdminDashboard() {
   // Share Link popover state
   const [openPopoverId, setOpenPopoverId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Remove-student (revoke access) confirmation state
+  const [studentToRemove, setStudentToRemove] = useState<LicenseRow | null>(null);
+  const [removingStudent, setRemovingStudent] = useState(false);
 
   // Buy Seats dialog state
   const [buyDialogOpen, setBuyDialogOpen] = useState(false);
@@ -359,6 +374,12 @@ export default function AdminDashboard() {
    * @returns Promise<void>
    */
   const handleOpenBuyDialog = async (): Promise<void> => {
+    // LAUNCH-PHASE LOCKDOWN: block self-service purchasing while Stripe is in test mode.
+    if (!PURCHASING_ENABLED) {
+      toast.info(PURCHASING_DISABLED_MESSAGE);
+      return;
+    }
+
     const { data, error } = await supabase
       .from("course_bundles")
       .select("id, name, price_per_seat, bundle_type")
@@ -381,6 +402,13 @@ export default function AdminDashboard() {
    * @returns Promise<void>
    */
   const handleConfirmPurchase = async (): Promise<void> => {
+    // LAUNCH-PHASE LOCKDOWN: defense-in-depth — never hit checkout while disabled.
+    if (!PURCHASING_ENABLED) {
+      toast.info(PURCHASING_DISABLED_MESSAGE);
+      setBuyDialogOpen(false);
+      return;
+    }
+
     if (!selectedBundleId || !orgId) return;
 
     setCheckingOut(true);
@@ -490,6 +518,38 @@ export default function AdminDashboard() {
       toast.error(error.message || "Invitation failed");
     } finally {
       setInviting(false);
+    }
+  };
+
+  /**
+   * Revokes a student's access by deleting their license row, which returns the
+   * seat to the org's pool (the seat RPC counts licenses, so removal frees it).
+   * If the student had already signed up, their next visit shows a professional
+   * "access unavailable" screen (see useStudentBundle `noAccess`).
+   * @param license - The license row to remove.
+   * @returns Promise<void>
+   */
+  const handleRemoveStudent = async (license: LicenseRow): Promise<void> => {
+    if (!orgId) return;
+    setRemovingStudent(true);
+    try {
+      const { error: delError } = await supabase
+        .from("licenses")
+        .delete()
+        .eq("id", license.id);
+
+      if (delError) throw delError;
+
+      // Return the seat to the pool (mirrors increment_used_seats on assign).
+      await supabase.rpc("decrement_used_seats", { org_id_param: orgId });
+
+      toast.success(`Access removed for ${license.student_email}. Seat returned to your pool.`);
+      setStudentToRemove(null);
+      fetchDashboardData();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to remove student.");
+    } finally {
+      setRemovingStudent(false);
     }
   };
 
@@ -1046,6 +1106,34 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Remove Student (revoke access) confirmation ─────────────────── */}
+      <AlertDialog open={!!studentToRemove} onOpenChange={(open) => !open && setStudentToRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this student?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes access for{" "}
+              <span className="font-semibold text-foreground">{studentToRemove?.student_email}</span>{" "}
+              and returns their seat to your available pool. If they log in afterward, they&apos;ll
+              be asked to contact your organization. You can re-invite them at any time.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removingStudent}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={removingStudent}
+              onClick={(e) => {
+                e.preventDefault();
+                if (studentToRemove) handleRemoveStudent(studentToRemove);
+              }}
+            >
+              {removingStudent ? <Loader2 className="h-4 w-4 animate-spin" /> : "Remove access"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ── Buy Seats Dialog ─────────────────────────────────────────── */}
       <Dialog open={buyDialogOpen} onOpenChange={setBuyDialogOpen}>
@@ -1653,6 +1741,7 @@ export default function AdminDashboard() {
                         </span>
                       </td>
                       <td className="py-3.5 pl-4 pr-6 text-right">
+                        <div className="flex items-center justify-end gap-1">
                         {!s.is_active && (
                           <Popover
                             open={openPopoverId === s.id}
@@ -1696,6 +1785,16 @@ export default function AdminDashboard() {
                             </PopoverContent>
                           </Popover>
                         )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2.5 text-xs gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setStudentToRemove(s)}
+                          >
+                            <UserMinus className="h-3 w-3" />
+                            Remove
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );

@@ -29,7 +29,7 @@ type ViewState = "menu" | string; // "menu" or lessonId
 export const ChatContainer = () => {
   const { profile, user } = useAuth();
   const { orgName } = useOrgName(user?.email);
-  const { allowedLessonIds, isExpired } = useStudentBundle(user?.email, profile?.role, profile?.group_name);
+  const { allowedLessonIds, isExpired, noAccess } = useStudentBundle(user?.email, profile?.role, profile?.group_name);
   const isDemoUser = profile?.group_name === "__demo__";
   const [viewState, setViewState] = useState<ViewState>("menu");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
@@ -261,6 +261,33 @@ export const ChatContainer = () => {
       </DialogContent>
     </Dialog>
   );
+
+  // Access removed: a student whose license was revoked (or never assigned) by
+  // their organization. Show a professional message instead of any lessons.
+  if (noAccess) {
+    return (
+      <div className="flex flex-col h-screen max-h-screen bg-background">
+        <ChatHeader />
+        <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center">
+          <div className="w-full max-w-md text-center animate-fade-in">
+            <img src={launchpadLogo} alt="LaunchPad" className="h-16 w-auto mx-auto mb-8" />
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 border border-primary/20">
+              <Building2 className="h-8 w-8 text-primary" />
+            </div>
+            <h1 className="font-display text-2xl font-bold text-foreground mb-3">
+              Access Unavailable
+            </h1>
+            <p className="text-muted-foreground leading-relaxed">
+              Your access to the LaunchPad program{orgName ? <> through <span className="font-semibold text-foreground">{orgName}</span></> : ""} isn&apos;t active right now. This usually means your seat hasn&apos;t been assigned yet or has been released.
+            </p>
+            <p className="text-muted-foreground leading-relaxed mt-3">
+              Please contact your organization administrator to restore your access.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Render menu/lesson selector
   if (viewState === "menu") {

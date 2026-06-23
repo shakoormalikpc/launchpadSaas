@@ -32,6 +32,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   try {
+    // ── LAUNCH-PHASE LOCKDOWN ──────────────────────────────────────────────
+    // Stripe is in TEST mode in production while seats are sold offline.
+    // Block all checkout creation unless explicitly re-enabled via env.
+    // Re-enable: set PURCHASING_ENABLED=true on this function's secrets.
+    if (Deno.env.get("PURCHASING_ENABLED") !== "true") {
+      return new Response(
+        JSON.stringify({ error: "Purchasing is temporarily disabled during the launch phase." }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const { org_id, bundle_id, quantity, subscription_type }: RequestBody = await req.json();
 
     if (!org_id || !bundle_id || !quantity || quantity < 1) {
