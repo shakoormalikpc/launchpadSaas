@@ -29,6 +29,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AnalyticsSection } from "@/components/admin/analytics/AnalyticsSection";
+import type { StudentOption } from "@/components/admin/analytics/AnalyticsControls";
 import {
   PieChart,
   Pie,
@@ -697,6 +700,20 @@ export default function AdminDashboard() {
       )
     : students;
 
+  // Roster for the analytics student filter: signed-up students (have a user_id),
+  // de-duplicated by user_id, labeled by email.
+  const analyticsRoster: StudentOption[] = (() => {
+    const seen = new Set<string>();
+    const out: StudentOption[] = [];
+    for (const s of students) {
+      if (s.user_id && !seen.has(s.user_id)) {
+        seen.add(s.user_id);
+        out.push({ userId: s.user_id, label: s.student_email });
+      }
+    }
+    return out.sort((a, b) => a.label.localeCompare(b.label));
+  })();
+
   const selectedBundle = bundles.find((b) => b.id === selectedBundleId);
   const totalPrice = selectedBundle
     ? (selectedBundle.price_per_seat * seatQuantity).toFixed(2)
@@ -867,6 +884,15 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      {/* ── Tabbed body: Overview vs Reports & Analytics ─────────────── */}
+      <Tabs defaultValue="overview" className="space-y-8">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="analytics">Reports &amp; Analytics</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-8 mt-0">
 
       {/* ── Past-due warning banner ──────────────────────────────────── */}
       {subscriptionStatus === "past_due" && (
@@ -1826,6 +1852,13 @@ export default function AdminDashboard() {
           </div>
         </CardContent>
       </Card>
+
+        </TabsContent>
+
+        <TabsContent value="analytics" className="mt-0">
+          <AnalyticsSection orgId={orgId} orgName={orgName} roster={analyticsRoster} />
+        </TabsContent>
+      </Tabs>
 
       {/* ── Edit Profile Dialog ─────────────────────────────────────── */}
       <Dialog open={editProfileOpen} onOpenChange={setEditProfileOpen}>

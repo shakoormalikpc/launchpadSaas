@@ -9,6 +9,9 @@ export interface LessonProgress {
   completed: boolean;
   postTestScore: number;
   postTestTotal: number;
+  preTestScore: number;
+  preTestTotal: number;
+  attempts: number;
   completedAt?: string;
 }
 
@@ -48,6 +51,9 @@ export const useProgressTracking = () => {
         completed: row.status === 'completed',
         postTestScore: row.score_post || 0,
         postTestTotal: row.score_post_total || 10, // Get actual quiz length from database
+        preTestScore: row.score_pre || 0,
+        preTestTotal: row.score_pre_total || 0,
+        attempts: row.attempts || 1,
         completedAt: row.updated_at
       }));
 
@@ -73,21 +79,39 @@ export const useProgressTracking = () => {
     refetchProgress();
   }, [refetchProgress]);
 
+  /**
+   * Records a completed lesson attempt. Persists the post-test result, the
+   * pre-test result (for growth analytics), and increments the retake/attempt
+   * count atomically via the record_lesson_attempt RPC — which appends to the
+   * lesson_attempts history table and upserts the user_progress snapshot.
+   * @param lessonId - The lesson that was completed.
+   * @param postTestScore - Raw post-test score (e.g. 4 correct).
+   * @param postTestTotal - Total post-test questions (e.g. 5).
+   * @param preTestScore - Raw pre-test score captured at lesson start.
+   * @param preTestTotal - Total pre-test questions.
+   * @returns A promise that resolves once the attempt has been recorded.
+   */
   const recordLessonCompletion = useCallback(async (
     lessonId: string,
     postTestScore: number,
-    postTestTotal: number
-  ) => {
+    postTestTotal: number,
+    preTestScore: number = 0,
+    preTestTotal: number = 0
+  ): Promise<void> => {
     if (!user) return;
 
-    // Optimistic update
+    // Optimistic update — bump the attempt count if this lesson already exists.
     setProgress(prev => {
       const existingIndex = prev.lessonsCompleted.findIndex(l => l.lessonId === lessonId);
+      const prevAttempts = existingIndex >= 0 ? prev.lessonsCompleted[existingIndex].attempts : 0;
       const newLessonProgress: LessonProgress = {
         lessonId,
         completed: true,
         postTestScore,
         postTestTotal,
+        preTestScore,
+        preTestTotal,
+        attempts: prevAttempts + 1,
         completedAt: new Date().toISOString(),
       };
 
@@ -105,20 +129,15 @@ export const useProgressTracking = () => {
       };
     });
 
-    // Save to Supabase
+    // Persist via the atomic RPC (history row + snapshot upsert + attempt count).
     try {
-      const { error } = await supabase
-        .from('user_progress')
-        .upsert({
-          user_id: user.id,
-          lesson_id: lessonId,
-          status: 'completed',
-          score_post: postTestScore,        // Save raw score (e.g., 4 correct)
-          score_post_total: postTestTotal,  // Save total questions (e.g., 5 questions)
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id,lesson_id'
-        });
+      const { error } = await (supabase as any).rpc('record_lesson_attempt', {
+        p_lesson_id: lessonId,
+        p_score_pre: preTestScore,
+        p_score_pre_total: preTestTotal,
+        p_score_post: postTestScore,
+        p_score_post_total: postTestTotal,
+      });
 
       if (error) throw error;
       toast.success("Progress saved!");

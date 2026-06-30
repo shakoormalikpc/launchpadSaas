@@ -160,7 +160,9 @@ export const ChatContainer = () => {
       recordLessonCompletion(
         activeLessonId,
         genericLesson.completionData.postTestScore,
-        genericLesson.completionData.postTestTotal
+        genericLesson.completionData.postTestTotal,
+        genericLesson.completionData.preTestScore,
+        genericLesson.completionData.preTestTotal
       );
     }
   }, [genericLesson.completionData, activeLessonId, recordLessonCompletion]);
@@ -171,7 +173,9 @@ export const ChatContainer = () => {
       recordLessonCompletion(
         "living-on-your-own",
         lesson2.completionData.postTestScore,
-        lesson2.completionData.postTestTotal
+        lesson2.completionData.postTestTotal,
+        lesson2.completionData.preTestScore,
+        lesson2.completionData.preTestTotal
       );
     }
   }, [lesson2.completionData, viewState, recordLessonCompletion]);

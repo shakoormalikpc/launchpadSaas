@@ -85,6 +85,9 @@ const initialState: LessonState = {
 export interface LessonCompletionData {
   postTestScore: number;
   postTestTotal: number;
+  /** Pre-test result captured at the start of the lesson, used for growth analytics. */
+  preTestScore: number;
+  preTestTotal: number;
 }
 
 export const useGenericLesson = (lessonData: LessonData, lessonId?: string) => {
@@ -492,10 +495,13 @@ export const useGenericLesson = (lessonData: LessonData, lessonId?: string) => {
           const percentage = Math.round((finalScore / totalQuestions) * 100);
           const isPassing = percentage >= 80;
 
-          // Store completion data for progress tracking
+          // Store completion data for progress tracking. The pre-test result is
+          // carried through so growth (post − pre) can be persisted for analytics.
           setCompletionData({
             postTestScore: finalScore,
             postTestTotal: totalQuestions,
+            preTestScore: stateRef.current.pretestCorrect ?? 0,
+            preTestTotal: lessonData.preTest.length,
           });
 
           let gradeMessage: string;
